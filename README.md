@@ -24,12 +24,16 @@ Coming soon...
 ### Option 2: Manual Install
 Download the latest release from the Releases Page.
 
-Unzip FITSLook.app.
-
-Move it to your /Applications folder.
-
-Run the app once to register the Quick Look service.
-
+```bash
+pyinstaller --onefile --windowed --name "FITSLook" \
+--osx-bundle-identifier "com.astro.fitslook" \
+--add-data "app_icon.png:." \
+--icon "app_icon.icns" \
+--extras-bundle-info info.plist \
+--exclude-module asdf \
+--hidden-import numpy._core._exceptions \
+fitsview.py
+```
 
 ## 📖 Usage
 Using Quick Look (macOS)
