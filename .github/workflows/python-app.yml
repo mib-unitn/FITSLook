@@ -57,59 +57,6 @@ jobs:
           name: FITSLook-Linux
           path: dist/FITSLook
 
-  # ===================================================
-  # 2. BUILD FOR MACOS (INTEL) - CRITICAL FIXES HERE
-  # ===================================================
-  build-macos-intel:
-    runs-on: macos-latest
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python 3.11 (Intel x64)
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.11"
-        architecture: 'x64' 
-
-    - name: Install Dependencies (Force x86_64)
-      run: |
-        arch -x86_64 python -m pip install --upgrade pip
-        # CRITICAL: Collect all Astropy/Matplotlib dependencies to ensure C-libraries are found
-        arch -x86_64 python -m pip install pyinstaller astropy matplotlib numpy pillow PyQt6
-
-    - name: Generate Assets
-      run: |
-        python -c "from PIL import Image, ImageDraw; img = Image.new('RGBA', (256, 256), (15, 17, 26, 255)); d = ImageDraw.Draw(img); d.ellipse((28, 28, 228, 228), outline=(88, 166, 255), width=10); img.save('app_icon.png')"
-
-    - name: Build Intel App
-      run: |
-        # CRITICAL: Add --collect-all for astropy and matplotlib
-        arch -x86_64 python -m PyInstaller --onefile --windowed --name "FITSLook" \
-        --target-arch x86_64 \
-        --osx-bundle-identifier "com.astro.fitslook" \
-        --add-data "app_icon.png:." \
-        --collect-all astropy \
-        --collect-all matplotlib \
-        --exclude-module asdf \
-        --exclude-module PySide6 \
-        --hidden-import numpy._core._exceptions \
-        fitsview.py
-
-    - name: Update Info.plist & Re-Sign
-      run: |
-        python3 -c "import plistlib; p='dist/FITSLook.app/Contents/Info.plist'; pl=plistlib.load(open(p,'rb')); pl['CFBundleDocumentTypes']=[{'CFBundleTypeName':'FITS Image','CFBundleTypeRole':'Viewer','LSHandlerRank':'Owner','CFBundleTypeExtensions':['fits','fit','fts']}]; plistlib.dump(pl,open(p,'wb'))"
-        codesign --force --deep -s - dist/FITSLook.app
-
-    - name: Zip and Upload
-      run: |
-        cd dist
-        mv FITSLook.app FITSLook-Intel.app
-        ditto -c -k --keepParent FITSLook-Intel.app FITSLook-macOS-Intel.zip
-    
-    - uses: actions/upload-artifact@v4
-      with:
-        name: FITSLook-macOS-Intel
-        path: dist/FITSLook-macOS-Intel.zip
 
   # ===================================================
   # 3. BUILD FOR MACOS (APPLE SILICON) - CRITICAL FIXES HERE
@@ -168,7 +115,7 @@ jobs:
   # 4. CREATE RELEASE (Triggers only on Tags)
   # ===================================================
   release:
-    needs: [build-linux, build-macos-intel, build-macos-arm]
+    needs: [build-linux, build-macos-arm]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     
@@ -199,7 +146,6 @@ jobs:
             ${{ steps.changelog.outputs.commits }}
           files: |
             artifacts/FITSLook-Linux/FITSLook
-            artifacts/FITSLook-macOS-Intel/FITSLook-macOS-Intel.zip
             artifacts/FITSLook-macOS-AppleSilicon/FITSLook-macOS-AppleSilicon.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
