@@ -1,4 +1,4 @@
-# FITSLook Pro 🔭
+# FITSLook 🔭
 
 A modern, high-performance "Quick Look" viewer for astronomical FITS files. Designed for macOS and Linux with a native "Liquid Glass" UI.
 
