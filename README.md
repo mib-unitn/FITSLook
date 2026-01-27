@@ -63,11 +63,11 @@ source build_env/bin/activate
 pip install --upgrade pip
 pip install pyinstaller astropy matplotlib numpy pillow
 pip install "PyQt6==6.7.1" "PyQt6-Qt6==6.7.2"
-2. Build for Linux
-This command includes aggressive exclusions to prevent "DLL Hell" with system Qt plugins (3D, QML, WebEngine) that are not needed for this app.
-Run this exact command block:
-code
-Bash
+```
+
+### 2. Build for Linux
+
+```bash
 pyinstaller --onefile --windowed --name FITSLook \
 --add-data "app_icon.png:." \
 --hidden-import "numpy._core._exceptions" \
@@ -96,12 +96,16 @@ pyinstaller --onefile --windowed --name FITSLook \
 --exclude-module "PySide2" \
 --exclude-module "PyQt5" \
 fitsview.py
+```
+
 The binary will be located in dist/FITSLook.
-3. Build for macOS
+
+### 3. Build for macOS
+
 macOS requires an Info.plist file to handle file associations in Finder.
 Create info.plist in the project folder with this content:
-code
-Xml
+
+```xml 
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -125,9 +129,11 @@ Xml
     </array>
 </dict>
 </plist>
+```
+
 Run the Build Command:
-code
-Bash
+
+```bash
 pyinstaller --onefile --windowed --name "FITSLook" \
 --osx-bundle-identifier "com.astro.fitslook" \
 --add-data "app_icon.png:." \
@@ -137,18 +143,22 @@ pyinstaller --onefile --windowed --name "FITSLook" \
 --exclude-module PySide6 \
 --hidden-import numpy._core._exceptions \
 fitsview.py
+```
+
 The app bundle will be located in dist/FITSLook.app.
-❓ Troubleshooting
-Q: I get ImportError: PyQt6 or "Failed to load platform plugin 'xcb'" on Linux.
+
+### ❓ Troubleshooting
+#### Q: I get ImportError: PyQt6 or "Failed to load platform plugin 'xcb'" on Linux.
 A: Fedora and Ubuntu require system-level GL libraries. Run this:
-code
-Bash
+
+```bash
 sudo dnf install libxkbcommon-x11 xcb-util-wm xcb-util-image libglvnd-glx
-Q: The app crashes immediately on launch (Linux).
+```
+#### Q: The app crashes immediately on launch (Linux).
 A: Ensure you are running the binary from a terminal ./dist/FITSLook to see the error.
 If it mentions numpy._core, ensure you added the --hidden-import "numpy._core._exceptions" flag in the build command.
 If it mentions Qt_6.10_PRIVATE_API, ensure you ran the pip install "PyQt6==6.7.1" command in a clean venv as described above.
-Q: Right-click "Open With" isn't working on Linux.
+#### Q: Right-click "Open With" isn't working on Linux.
 A: The app registers itself when run.
 Move the binary to its final location (e.g., ~/bin).
 Run it manually once: ~/bin/FITSLook.
