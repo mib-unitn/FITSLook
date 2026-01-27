@@ -9,7 +9,7 @@ on:
 
 jobs:
   # ---------------------------------------------------
-  # BUILD FOR LINUX
+  # JOB 1: BUILD FOR LINUX
   # ---------------------------------------------------
   build-linux:
     runs-on: ubuntu-latest
@@ -35,7 +35,6 @@ jobs:
 
     - name: Generate Assets (Icon)
       run: |
-        # Generate a temporary icon so PyInstaller doesn't fail
         python -c "from PIL import Image, ImageDraw; img = Image.new('RGBA', (256, 256), (15, 17, 26, 255)); d = ImageDraw.Draw(img); d.ellipse((28, 28, 228, 228), outline=(88, 166, 255), width=10); img.save('app_icon.png')"
 
     - name: Build with PyInstaller (Linux)
@@ -76,22 +75,29 @@ jobs:
         path: dist/FITSLook
 
   # ---------------------------------------------------
-  # BUILD FOR MACOS (Universal Compatibility)
+  # JOB 2: BUILD FOR MACOS (Dual Architecture)
   # ---------------------------------------------------
   build-macos:
-    # Updated to 'macos-latest' (ARM64) to fix deprecation warning
     runs-on: macos-latest
+    strategy:
+      matrix:
+        include:
+          - arch: x64
+            pyinstaller_target: x86_64
+            name_suffix: Intel
+          - arch: arm64
+            pyinstaller_target: arm64
+            name_suffix: AppleSilicon
+    
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Python 3.11 (x64 Mode)
+    - name: Set up Python 3.11 (${{ matrix.name_suffix }})
       uses: actions/setup-python@v5
       with:
         python-version: "3.11"
-        # CRITICAL: Force x64 architecture.
-        # This makes the ARM runner use Rosetta 2 to download Intel Python.
-        # This ensures we build an Intel binary that runs on BOTH Intel and Apple Silicon Macs.
-        architecture: 'x64'
+        # This tells GitHub to use either Intel or ARM python environment
+        architecture: ${{ matrix.arch }}
 
     - name: Install Python Dependencies
       run: |
@@ -102,11 +108,11 @@ jobs:
       run: |
         python -c "from PIL import Image, ImageDraw; img = Image.new('RGBA', (256, 256), (15, 17, 26, 255)); d = ImageDraw.Draw(img); d.ellipse((28, 28, 228, 228), outline=(88, 166, 255), width=10); img.save('app_icon.png')"
 
-    - name: Build with PyInstaller (macOS)
+    - name: Build with PyInstaller
       run: |
-        # Explicitly target x86_64 to ensure broad compatibility
+        # Target specific architecture based on matrix
         pyinstaller --onefile --windowed --name "FITSLook" \
-        --target-arch x86_64 \
+        --target-arch ${{ matrix.pyinstaller_target }} \
         --osx-bundle-identifier "com.astro.fitslook" \
         --add-data "app_icon.png:." \
         --exclude-module asdf \
@@ -132,16 +138,20 @@ jobs:
             plistlib.dump(pl, f)
         "
         
-        # 2. Re-Sign the App (Ad-Hoc)
+        # 2. Re-Sign the App
         codesign --force --deep -s - dist/FITSLook.app
 
-    - name: Zip the App Bundle
+    - name: Rename and Zip
       run: |
         cd dist
-        ditto -c -k --keepParent FITSLook.app FITSLook-macOS.zip
+        # Rename app bundle to include architecture (e.g., FITSLook-Intel.app)
+        mv FITSLook.app FITSLook-${{ matrix.name_suffix }}.app
+        
+        # Create Zip
+        ditto -c -k --keepParent FITSLook-${{ matrix.name_suffix }}.app FITSLook-macOS-${{ matrix.name_suffix }}.zip
 
-    - name: Upload macOS Artifact
+    - name: Upload macOS Artifact (${{ matrix.name_suffix }})
       uses: actions/upload-artifact@v4
       with:
-        name: FITSLook-macOS
-        path: dist/FITSLook-macOS.zip
+        name: FITSLook-macOS-${{ matrix.name_suffix }}
+        path: dist/FITSLook-macOS-${{ matrix.name_suffix }}.zip
