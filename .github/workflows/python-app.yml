@@ -24,19 +24,16 @@ jobs:
     - name: Install System Dependencies (Linux)
       run: |
         sudo apt-get update
-        # UPDATED: Replaced 'libgl1-mesa-glx' with 'libgl1' for modern Ubuntu
         sudo apt-get install -y libgl1 libegl1 libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 x11-utils
 
     - name: Install Python Dependencies
       run: |
         python -m pip install --upgrade pip
         pip install pyinstaller astropy matplotlib numpy pillow
-        # Force specific version to avoid Linux private API errors
         pip install "PyQt6==6.7.1" "PyQt6-Qt6==6.7.2"
 
     - name: Generate Assets (Icon)
       run: |
-        # Generate a temporary icon so PyInstaller doesn't fail
         python -c "from PIL import Image, ImageDraw; img = Image.new('RGBA', (256, 256), (15, 17, 26, 255)); d = ImageDraw.Draw(img); d.ellipse((28, 28, 228, 228), outline=(88, 166, 255), width=10); img.save('app_icon.png')"
 
     - name: Build with PyInstaller (Linux)
@@ -94,48 +91,42 @@ jobs:
         python -m pip install --upgrade pip
         pip install pyinstaller astropy matplotlib numpy pillow PyQt6
 
-    - name: Generate Assets (Icon & Plist)
+    - name: Generate Assets (Icon)
       run: |
-        # Generate Icon
         python -c "from PIL import Image, ImageDraw; img = Image.new('RGBA', (256, 256), (15, 17, 26, 255)); d = ImageDraw.Draw(img); d.ellipse((28, 28, 228, 228), outline=(88, 166, 255), width=10); img.save('app_icon.png')"
-        
-        # Generate Info.plist for Finder Integration
-        cat <<EOF > info.plist
-        <?xml version="1.0" encoding="UTF-8"?>
-        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-        <plist version="1.0">
-        <dict>
-            <key>CFBundleDocumentTypes</key>
-            <array>
-                <dict>
-                    <key>CFBundleTypeName</key>
-                    <string>FITS Image</string>
-                    <key>CFBundleTypeRole</key>
-                    <string>Viewer</string>
-                    <key>LSHandlerRank</key>
-                    <string>Owner</string>
-                    <key>CFBundleTypeExtensions</key>
-                    <array>
-                        <string>fits</string>
-                        <string>fit</string>
-                        <string>fts</string>
-                    </array>
-                </dict>
-            </array>
-        </dict>
-        </plist>
-        EOF
 
     - name: Build with PyInstaller (macOS)
       run: |
+        # Build the app first (without the plist flag)
         pyinstaller --onefile --windowed --name "FITSLook" \
         --osx-bundle-identifier "com.astro.fitslook" \
         --add-data "app_icon.png:." \
-        --extras-bundle-info info.plist \
         --exclude-module asdf \
         --exclude-module PySide6 \
         --hidden-import numpy._core._exceptions \
         fitsview.py
+
+    - name: Update Info.plist (File Associations)
+      run: |
+        # Use Python to safely inject the File Association keys into the generated Plist
+        python3 -c "
+        import plistlib
+        plist_path = 'dist/FITSLook.app/Contents/Info.plist'
+        with open(plist_path, 'rb') as f:
+            pl = plistlib.load(f)
+        
+        # Add FITS file association
+        pl['CFBundleDocumentTypes'] = [{
+            'CFBundleTypeName': 'FITS Image',
+            'CFBundleTypeRole': 'Viewer',
+            'LSHandlerRank': 'Owner',
+            'CFBundleTypeExtensions': ['fits', 'fit', 'fts']
+        }]
+        
+        with open(plist_path, 'wb') as f:
+            plistlib.dump(pl, f)
+        print('Info.plist updated successfully with FITS associations.')
+        "
 
     - name: Zip the App Bundle
       run: |
