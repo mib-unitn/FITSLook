@@ -73,11 +73,11 @@ jobs:
         name: FITSLook-Linux
         path: dist/FITSLook
 
-  # ---------------------------------------------------
+# ---------------------------------------------------
   # BUILD FOR MACOS
   # ---------------------------------------------------
   build-macos:
-    runs-on: macos-latest
+    runs-on: macos-13 # Explicitly use Intel runner for maximum compatibility (runs on M1 via Rosetta)
     steps:
     - uses: actions/checkout@v4
 
@@ -95,10 +95,11 @@ jobs:
       run: |
         python -c "from PIL import Image, ImageDraw; img = Image.new('RGBA', (256, 256), (15, 17, 26, 255)); d = ImageDraw.Draw(img); d.ellipse((28, 28, 228, 228), outline=(88, 166, 255), width=10); img.save('app_icon.png')"
 
-    - name: Build with PyInstaller (macOS)
+    - name: Build with PyInstaller
       run: |
-        # Build the app first (without the plist flag)
+        # Build for x86_64 (Intel) to ensure it runs on ALL Macs (Intel + Apple Silicon via Rosetta)
         pyinstaller --onefile --windowed --name "FITSLook" \
+        --target-arch x86_64 \
         --osx-bundle-identifier "com.astro.fitslook" \
         --add-data "app_icon.png:." \
         --exclude-module asdf \
@@ -106,27 +107,27 @@ jobs:
         --hidden-import numpy._core._exceptions \
         fitsview.py
 
-    - name: Update Info.plist (File Associations)
+    - name: Update Info.plist & Re-Sign
       run: |
-        # Use Python to safely inject the File Association keys into the generated Plist
+        # 1. Inject File Associations
         python3 -c "
         import plistlib
         plist_path = 'dist/FITSLook.app/Contents/Info.plist'
         with open(plist_path, 'rb') as f:
             pl = plistlib.load(f)
-        
-        # Add FITS file association
         pl['CFBundleDocumentTypes'] = [{
             'CFBundleTypeName': 'FITS Image',
             'CFBundleTypeRole': 'Viewer',
             'LSHandlerRank': 'Owner',
             'CFBundleTypeExtensions': ['fits', 'fit', 'fts']
         }]
-        
         with open(plist_path, 'wb') as f:
             plistlib.dump(pl, f)
-        print('Info.plist updated successfully with FITS associations.')
         "
+        
+        # 2. Re-Sign the App (Ad-Hoc) to fix the modified Plist
+        # This fixes 'This app is damaged' errors
+        codesign --force --deep -s - dist/FITSLook.app
 
     - name: Zip the App Bundle
       run: |
