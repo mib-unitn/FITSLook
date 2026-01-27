@@ -17,7 +17,7 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Set up Python 3.11
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: "3.11"
 
@@ -30,10 +30,12 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install pyinstaller astropy matplotlib numpy pillow
+        # Force specific version to avoid Linux private API errors
         pip install "PyQt6==6.7.1" "PyQt6-Qt6==6.7.2"
 
     - name: Generate Assets (Icon)
       run: |
+        # Generate a temporary icon so PyInstaller doesn't fail
         python -c "from PIL import Image, ImageDraw; img = Image.new('RGBA', (256, 256), (15, 17, 26, 255)); d = ImageDraw.Draw(img); d.ellipse((28, 28, 228, 228), outline=(88, 166, 255), width=10); img.save('app_icon.png')"
 
     - name: Build with PyInstaller (Linux)
@@ -73,18 +75,23 @@ jobs:
         name: FITSLook-Linux
         path: dist/FITSLook
 
-# ---------------------------------------------------
-  # BUILD FOR MACOS
+  # ---------------------------------------------------
+  # BUILD FOR MACOS (Universal Compatibility)
   # ---------------------------------------------------
   build-macos:
-    runs-on: macos-13 # Explicitly use Intel runner for maximum compatibility (runs on M1 via Rosetta)
+    # Updated to 'macos-latest' (ARM64) to fix deprecation warning
+    runs-on: macos-latest
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v4
+    - name: Set up Python 3.11 (x64 Mode)
+      uses: actions/setup-python@v5
       with:
         python-version: "3.11"
+        # CRITICAL: Force x64 architecture.
+        # This makes the ARM runner use Rosetta 2 to download Intel Python.
+        # This ensures we build an Intel binary that runs on BOTH Intel and Apple Silicon Macs.
+        architecture: 'x64'
 
     - name: Install Python Dependencies
       run: |
@@ -95,9 +102,9 @@ jobs:
       run: |
         python -c "from PIL import Image, ImageDraw; img = Image.new('RGBA', (256, 256), (15, 17, 26, 255)); d = ImageDraw.Draw(img); d.ellipse((28, 28, 228, 228), outline=(88, 166, 255), width=10); img.save('app_icon.png')"
 
-    - name: Build with PyInstaller
+    - name: Build with PyInstaller (macOS)
       run: |
-        # Build for x86_64 (Intel) to ensure it runs on ALL Macs (Intel + Apple Silicon via Rosetta)
+        # Explicitly target x86_64 to ensure broad compatibility
         pyinstaller --onefile --windowed --name "FITSLook" \
         --target-arch x86_64 \
         --osx-bundle-identifier "com.astro.fitslook" \
@@ -125,8 +132,7 @@ jobs:
             plistlib.dump(pl, f)
         "
         
-        # 2. Re-Sign the App (Ad-Hoc) to fix the modified Plist
-        # This fixes 'This app is damaged' errors
+        # 2. Re-Sign the App (Ad-Hoc)
         codesign --force --deep -s - dist/FITSLook.app
 
     - name: Zip the App Bundle
