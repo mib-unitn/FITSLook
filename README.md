@@ -1,8 +1,7 @@
-# FITSLook Pro 🔭
+# FITSLook 🔭
 
 A professional, high-performance "Quick Look" viewer for astronomical FITS files. Designed for Linux (Fedora/Ubuntu) and macOS with a modern "Liquid Glass" interface.
 
-![FITSLook UI](https://via.placeholder.com/800x500.png?text=FITSLook+Pro+Interface)
 
 ## ✨ Features
 
@@ -19,22 +18,23 @@ A professional, high-performance "Quick Look" viewer for astronomical FITS files
 
 ### 🐧 Linux (Fedora, Ubuntu, Arch)
 1.  Download the **binary** from the Releases page.
-2.  Move it to a permanent location (e.g., `~/bin/`):
+2.  Move it to a permanent location (e.g., `~/.local/bin`):
+
     ```bash
-    mkdir -p ~/bin
-    mv FITSLook ~/bin/
-    chmod +x ~/bin/FITSLook
+    mkdir -p ~/.local/bin
+    mv FITSLook ~/.local/bin/
+    chmod +x ~/.local/bin/FITSLook
     ```
 3.  **Run it once** from the terminal to register the desktop shortcut:
     ```bash
-    ~/bin/FITSLook
+    ~/.local/bin/FITSLook
     ```
-4.  You can now right-click any `.fits` file → **Open With FITSLook Pro**.
+4.  You can now right-click any `.fits` file → **Open With FITSLook**.
 
 ### 🍎 macOS
 1.  Download `FITSLook.app.zip` from Releases.
 2.  Drag `FITSLook.app` into your `/Applications` folder.
-3.  Right-click a FITS file → **Open With** → **FITSLook Pro**.
+3.  Right-click a FITS file → **Open With** → **FITSLook**.
 
 ---
 
