@@ -22,7 +22,7 @@ A modern, high-performance "Quick Look" viewer for astronomical FITS files. Desi
     chmod +x ~/bin/FITSLook
     ~/bin/FITSLook  # Run once to register right-click menu
     ```
-3.  **Use:** Right-click any `.fits` file -> Open With -> FITSLook Pro.
+3.  **Use:** Right-click any `.fits` file -> Open With -> FITSLook.
 
 ### 🍎 macOS
 1.  **Download:** Grab the `FITSLook.app` zip from the [Releases Page](#).
