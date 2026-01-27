@@ -1,75 +1,63 @@
-# FITSLook 🔭
+# FITSLook Pro 🔭
 
-**The missing Quick Look plugin for Astronomers.**
+A modern, high-performance "Quick Look" viewer for astronomical FITS files. Designed for macOS and Linux with a native "Liquid Glass" UI.
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)
-![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)
+![Screenshot](https://via.placeholder.com/800x500.png?text=FITSLook+Pro+UI)
 
-FITSLook is a lightweight utility that brings native preview capabilities to FITS (Flexible Image Transport System) files. Stop opening heavy image processing software just to check if a frame is good—preview headers and image data directly from your file explorer.
+## Features
+*   **Automatic 1D Spectrum Detection:** Smartly detects spectral data and plots it instantly.
+*   **Cube Integration:** Switch between slice viewing and Sum/Mean/Max integration for 3D cubes.
+*   **Modern UI:** Beautiful light-themed interface with glass-morphism panels.
+*   **Native Integration:** Adds "Open With" shortcuts to Finder (macOS), Nautilus, Dolphin, and Thunar (Linux).
+*   **Metadata:** Instant access to FITS headers and binary tables.
 
-## ✨ Features
+## 🚀 Installation (The Easy Way)
 
-* **Instant Preview:** View FITS images immediately in Finder (macOS) or your file explorer without launching full-scale applications like DS9 or PixInsight.
-* **Header Inspection:** Scroll through the FITS Header Data Unit (HDU) to verify keywords, exposure time, object name, and telescope telemetry.
-* **Automatic Stretching:** Applies intelligent auto-stretch (ZScale or Min/Max) to make faint astronomical data visible immediately.
-* **Lightweight:** Optimized for speed; minimal memory footprint.
+### 🐧 Linux (Fedora, Ubuntu, Arch, etc.)
+1.  **Download:** Grab the binary from the [Releases Page](#).
+2.  **Install:**
+    ```bash
+    mkdir -p ~/bin
+    mv FITSLook ~/bin/
+    chmod +x ~/bin/FITSLook
+    ~/bin/FITSLook  # Run once to register right-click menu
+    ```
+3.  **Use:** Right-click any `.fits` file -> Open With -> FITSLook Pro.
 
-## 🚀 Installation (Pre-built)
-
-### Option 1: Homebrew
-
-Coming soon...
-
-### Option 2: Manual Install
-Download the latest release from the Releases Page.
-
-```bash
-pyinstaller --onefile --windowed --name "FITSLook" \
---osx-bundle-identifier "com.astro.fitslook" \
---add-data "app_icon.png:." \
---icon "app_icon.icns" \
---extras-bundle-info info.plist \
---exclude-module asdf \
---hidden-import numpy._core._exceptions \
-fitsview.py
-```
-
-## 📖 Usage
-Using Quick Look (macOS)
-Select a .fits or .fit file in Finder.
-
-Press Spacebar.
-
-You will see a rendered preview of the image data alongside the primary header metadata.
-
-Using the Standalone Viewer
-Double-click any FITS file to open it in the dedicated FITSLook window for a slightly more detailed view, including histogram checks and basic zoom.
-
-## 🤝 Contributing
-Contributions are what make the open-source community such an amazing place to learn, inspire, and create. Any contributions you make are greatly appreciated.
-
-Fork the Project
-
-Create your Feature Branch (git checkout -b feature/AmazingFeature)
-
-Commit your Changes (git commit -m 'Add some AmazingFeature')
-
-Push to the Branch (git push origin feature/AmazingFeature)
-
-Open a Pull Request
-
-## 📜 License
-Distributed under the MIT License. See LICENSE for more information.
-
-## Acknowledgements
-Built using CFITSIO
-
-Inspired by the needs of astrophotographers worldwide.
-
+### 🍎 macOS
+1.  **Download:** Grab the `FITSLook.app` zip from the [Releases Page](#).
+2.  **Install:** Drag `FITSLook.app` into your `/Applications` folder.
+3.  **Use:** Right-click a FITS file -> Open With -> FITSLook.
 
 ---
 
-### Next Step for you
+## 🛠 Building from Source
 
-Would you like me to generate a **`.gitignore` file** tailored for this project? I can ensure it correctly ignores the Xcode build artifacts and the `.DS_Store` files while ensuring your `app_icon.png` is tracked.
+If you want to modify the code or build it yourself:
+
+### Prerequisites
+*   Python 3.9+
+*   `pip`
+
+### Build Command
+We provide a build script that handles everything (dependencies, icon generation, and OS integration).
+
+1.  **Clone the repo:**
+    ```bash
+    git clone https://github.com/yourusername/fitslook.git
+    cd fitslook
+    ```
+
+2.  **Install requirements:**
+    ```bash
+    pip install pyinstaller astropy matplotlib PyQt6 numpy pillow
+    ```
+
+3.  **Run the Builder:**
+    ```bash
+    python3 build.py
+    ```
+
+4.  **Find your App:**
+    *   **Linux:** Executable is in `dist/FITSLook`
+    *   **macOS:** App bundle is in `dist/FITSLook.app`
