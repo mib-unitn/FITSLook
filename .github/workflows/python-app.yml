@@ -1,11 +1,18 @@
-name: Build FITSViewer
+name: Build and Release FITSViewer
 
 on:
   push:
+    # Build on main branch commits
     branches: [ "main", "master" ]
+    # AND Build/Release on version tags (e.g., v1.0.0)
+    tags:
+      - 'v*'
   pull_request:
     branches: [ "main", "master" ]
   workflow_dispatch:
+
+permissions:
+  contents: write  # Required to create releases
 
 jobs:
   # ===================================================
@@ -73,61 +80,9 @@ jobs:
         name: FITSLook-Linux
         path: dist/FITSLook
 
-  # ===================================================
-  # 2. BUILD FOR MACOS (INTEL - x86_64)
-  # ===================================================
-  build-macos-intel:
-    runs-on: macos-latest
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python 3.11 (Intel x64)
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.11"
-        architecture: 'x64'
-
-    - name: Install Dependencies (Force x86_64)
-      run: |
-        # CRITICAL FIX: Use 'arch -x86_64' to force pip to download Intel wheels
-        # even though we are running on an Apple Silicon machine.
-        arch -x86_64 python -m pip install --upgrade pip
-        arch -x86_64 python -m pip install pyinstaller astropy matplotlib numpy pillow PyQt6
-
-    - name: Generate Assets
-      run: |
-        python -c "from PIL import Image, ImageDraw; img = Image.new('RGBA', (256, 256), (15, 17, 26, 255)); d = ImageDraw.Draw(img); d.ellipse((28, 28, 228, 228), outline=(88, 166, 255), width=10); img.save('app_icon.png')"
-
-    - name: Build Intel App
-      run: |
-        # CRITICAL FIX: Run PyInstaller under Rosetta as well
-        arch -x86_64 python -m PyInstaller --onefile --windowed --name "FITSLook" \
-        --target-arch x86_64 \
-        --osx-bundle-identifier "com.astro.fitslook" \
-        --add-data "app_icon.png:." \
-        --exclude-module asdf \
-        --exclude-module PySide6 \
-        --hidden-import numpy._core._exceptions \
-        fitsview.py
-
-    - name: Update Info.plist & Re-Sign
-      run: |
-        python3 -c "import plistlib; p='dist/FITSLook.app/Contents/Info.plist'; pl=plistlib.load(open(p,'rb')); pl['CFBundleDocumentTypes']=[{'CFBundleTypeName':'FITS Image','CFBundleTypeRole':'Viewer','LSHandlerRank':'Owner','CFBundleTypeExtensions':['fits','fit','fts']}]; plistlib.dump(pl,open(p,'wb'))"
-        codesign --force --deep -s - dist/FITSLook.app
-
-    - name: Zip and Upload
-      run: |
-        cd dist
-        mv FITSLook.app FITSLook-Intel.app
-        ditto -c -k --keepParent FITSLook-Intel.app FITSLook-macOS-Intel.zip
-    
-    - uses: actions/upload-artifact@v4
-      with:
-        name: FITSLook-macOS-Intel
-        path: dist/FITSLook-macOS-Intel.zip
 
   # ===================================================
-  # 3. BUILD FOR MACOS (APPLE SILICON / ARM64)
+  # 2. BUILD FOR MACOS (APPLE SILICON)
   # ===================================================
   build-macos-arm:
     runs-on: macos-latest
@@ -138,7 +93,7 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: "3.11"
-        architecture: 'arm64' # Native
+        architecture: 'arm64' 
 
     - name: Install Dependencies
       run: |
@@ -175,3 +130,53 @@ jobs:
       with:
         name: FITSLook-macOS-AppleSilicon
         path: dist/FITSLook-macOS-AppleSilicon.zip
+
+  # ===================================================
+  # 4. CREATE RELEASE (Triggers only on Tags)
+  # ===================================================
+  release:
+    needs: [build-linux, build-macos-arm]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') # Only run if tag starts with 'v'
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch all history for changelog
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Generate Changelog
+        id: changelog
+        run: |
+          # Find the previous tag. If none, grab everything.
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          
+          echo "Generating changelog..."
+          if [ -z "$PREV_TAG" ]; then
+            # First release: log everything
+            LOG=$(git log --pretty=format:"* %s (%h)")
+          else
+            # Log from previous tag to current
+            LOG=$(git log --pretty=format:"* %s (%h)" $PREV_TAG..HEAD)
+          fi
+          
+          # Write multi-line output to GITHUB_OUTPUT
+          echo "commits<<EOF" >> $GITHUB_OUTPUT
+          echo "$LOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          body: |
+            ## Changes in this Release
+            ${{ steps.changelog.outputs.commits }}
+          files: |
+            artifacts/FITSLook-Linux/FITSLook
+            artifacts/FITSLook-macOS-AppleSilicon/FITSLook-macOS-AppleSilicon.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
