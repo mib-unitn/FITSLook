@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  # ---------------------------------------------------
-  # JOB 1: BUILD FOR LINUX
-  # ---------------------------------------------------
+  # ===================================================
+  # 1. BUILD FOR LINUX (Ubuntu/Fedora Compatible)
+  # ===================================================
   build-linux:
     runs-on: ubuntu-latest
     steps:
@@ -21,7 +21,7 @@ jobs:
       with:
         python-version: "3.11"
 
-    - name: Install System Dependencies (Linux)
+    - name: Install System Dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y libgl1 libegl1 libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 x11-utils
@@ -30,14 +30,13 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install pyinstaller astropy matplotlib numpy pillow
-        # Force specific version to avoid Linux private API errors
         pip install "PyQt6==6.7.1" "PyQt6-Qt6==6.7.2"
 
-    - name: Generate Assets (Icon)
+    - name: Generate Icon
       run: |
         python -c "from PIL import Image, ImageDraw; img = Image.new('RGBA', (256, 256), (15, 17, 26, 255)); d = ImageDraw.Draw(img); d.ellipse((28, 28, 228, 228), outline=(88, 166, 255), width=10); img.save('app_icon.png')"
 
-    - name: Build with PyInstaller (Linux)
+    - name: Build Binary
       run: |
         pyinstaller --onefile --windowed --name FITSLook \
         --add-data "app_icon.png:." \
@@ -68,51 +67,41 @@ jobs:
         --exclude-module "PyQt5" \
         fitsview.py
 
-    - name: Upload Linux Artifact
+    - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
         name: FITSLook-Linux
         path: dist/FITSLook
 
-  # ---------------------------------------------------
-  # JOB 2: BUILD FOR MACOS (Dual Architecture)
-  # ---------------------------------------------------
-  build-macos:
+  # ===================================================
+  # 2. BUILD FOR MACOS (INTEL)
+  # ===================================================
+  build-macos-intel:
     runs-on: macos-latest
-    strategy:
-      matrix:
-        include:
-          - arch: x64
-            pyinstaller_target: x86_64
-            name_suffix: Intel
-          - arch: arm64
-            pyinstaller_target: arm64
-            name_suffix: AppleSilicon
-    
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Python 3.11 (${{ matrix.name_suffix }})
+    - name: Set up Python 3.11 (Intel x64)
       uses: actions/setup-python@v5
       with:
         python-version: "3.11"
-        # This tells GitHub to use either Intel or ARM python environment
-        architecture: ${{ matrix.arch }}
+        # Force x64 architecture. This allows us to build Intel apps 
+        # on the modern runners using Rosetta 2, avoiding deprecation errors.
+        architecture: 'x64' 
 
-    - name: Install Python Dependencies
+    - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
         pip install pyinstaller astropy matplotlib numpy pillow PyQt6
 
-    - name: Generate Assets (Icon)
+    - name: Generate Assets
       run: |
         python -c "from PIL import Image, ImageDraw; img = Image.new('RGBA', (256, 256), (15, 17, 26, 255)); d = ImageDraw.Draw(img); d.ellipse((28, 28, 228, 228), outline=(88, 166, 255), width=10); img.save('app_icon.png')"
 
-    - name: Build with PyInstaller
+    - name: Build Intel App
       run: |
-        # Target specific architecture based on matrix
         pyinstaller --onefile --windowed --name "FITSLook" \
-        --target-arch ${{ matrix.pyinstaller_target }} \
+        --target-arch x86_64 \
         --osx-bundle-identifier "com.astro.fitslook" \
         --add-data "app_icon.png:." \
         --exclude-module asdf \
@@ -122,36 +111,66 @@ jobs:
 
     - name: Update Info.plist & Re-Sign
       run: |
-        # 1. Inject File Associations
-        python3 -c "
-        import plistlib
-        plist_path = 'dist/FITSLook.app/Contents/Info.plist'
-        with open(plist_path, 'rb') as f:
-            pl = plistlib.load(f)
-        pl['CFBundleDocumentTypes'] = [{
-            'CFBundleTypeName': 'FITS Image',
-            'CFBundleTypeRole': 'Viewer',
-            'LSHandlerRank': 'Owner',
-            'CFBundleTypeExtensions': ['fits', 'fit', 'fts']
-        }]
-        with open(plist_path, 'wb') as f:
-            plistlib.dump(pl, f)
-        "
-        
-        # 2. Re-Sign the App
+        python3 -c "import plistlib; p='dist/FITSLook.app/Contents/Info.plist'; pl=plistlib.load(open(p,'rb')); pl['CFBundleDocumentTypes']=[{'CFBundleTypeName':'FITS Image','CFBundleTypeRole':'Viewer','LSHandlerRank':'Owner','CFBundleTypeExtensions':['fits','fit','fts']}]; plistlib.dump(pl,open(p,'wb'))"
         codesign --force --deep -s - dist/FITSLook.app
 
-    - name: Rename and Zip
+    - name: Zip and Upload
       run: |
         cd dist
-        # Rename app bundle to include architecture (e.g., FITSLook-Intel.app)
-        mv FITSLook.app FITSLook-${{ matrix.name_suffix }}.app
-        
-        # Create Zip
-        ditto -c -k --keepParent FITSLook-${{ matrix.name_suffix }}.app FITSLook-macOS-${{ matrix.name_suffix }}.zip
-
-    - name: Upload macOS Artifact (${{ matrix.name_suffix }})
-      uses: actions/upload-artifact@v4
+        mv FITSLook.app FITSLook-Intel.app
+        ditto -c -k --keepParent FITSLook-Intel.app FITSLook-macOS-Intel.zip
+    
+    - uses: actions/upload-artifact@v4
       with:
-        name: FITSLook-macOS-${{ matrix.name_suffix }}
-        path: dist/FITSLook-macOS-${{ matrix.name_suffix }}.zip
+        name: FITSLook-macOS-Intel
+        path: dist/FITSLook-macOS-Intel.zip
+
+  # ===================================================
+  # 3. BUILD FOR MACOS (APPLE SILICON / ARM64)
+  # ===================================================
+  build-macos-arm:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.11 (ARM64)
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+        architecture: 'arm64' # Native Apple Silicon
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller astropy matplotlib numpy pillow PyQt6
+
+    - name: Generate Assets
+      run: |
+        python -c "from PIL import Image, ImageDraw; img = Image.new('RGBA', (256, 256), (15, 17, 26, 255)); d = ImageDraw.Draw(img); d.ellipse((28, 28, 228, 228), outline=(88, 166, 255), width=10); img.save('app_icon.png')"
+
+    - name: Build ARM App
+      run: |
+        pyinstaller --onefile --windowed --name "FITSLook" \
+        --target-arch arm64 \
+        --osx-bundle-identifier "com.astro.fitslook" \
+        --add-data "app_icon.png:." \
+        --exclude-module asdf \
+        --exclude-module PySide6 \
+        --hidden-import numpy._core._exceptions \
+        fitsview.py
+
+    - name: Update Info.plist & Re-Sign
+      run: |
+        python3 -c "import plistlib; p='dist/FITSLook.app/Contents/Info.plist'; pl=plistlib.load(open(p,'rb')); pl['CFBundleDocumentTypes']=[{'CFBundleTypeName':'FITS Image','CFBundleTypeRole':'Viewer','LSHandlerRank':'Owner','CFBundleTypeExtensions':['fits','fit','fts']}]; plistlib.dump(pl,open(p,'wb'))"
+        codesign --force --deep -s - dist/FITSLook.app
+
+    - name: Zip and Upload
+      run: |
+        cd dist
+        mv FITSLook.app FITSLook-AppleSilicon.app
+        ditto -c -k --keepParent FITSLook-AppleSilicon.app FITSLook-macOS-AppleSilicon.zip
+    
+    - uses: actions/upload-artifact@v4
+      with:
+        name: FITSLook-macOS-AppleSilicon
+        path: dist/FITSLook-macOS-AppleSilicon.zip
