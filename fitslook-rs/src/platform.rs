@@ -37,10 +37,17 @@ pub fn ensure_linux_integration() {
         let desktop_path = Path::new(dir).join("fitslook.desktop");
         let content = format!(
             "[Desktop Entry]\n\
-             Name=AstroFITS\n\
+             Name=AstroFITS Explorer\n\
+             GenericName=FITS File Viewer\n\
+             Comment=View astronomical FITS images, spectra, and tables\n\
              Exec=\"{exe}\" %u\n\
+             Icon=fitslook\n\
              Type=Application\n\
-             MimeType=image/fits;image/x-fits;application/fits;\n"
+             Categories=Science;Astronomy;DataVisualization;\n\
+             MimeType=image/fits;image/x-fits;application/fits;\n\
+             Terminal=false\n\
+             StartupNotify=true\n\
+             Keywords=FITS;astronomy;science;spectroscopy;\n"
         );
         fs::write(&desktop_path, content).ok();
         Command::new("update-desktop-database")

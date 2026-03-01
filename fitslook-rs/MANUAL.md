@@ -65,6 +65,56 @@ The binary will be at:
 
 ---
 
+## Installing
+
+### Quick Install (recommended)
+
+```bash
+cd fitslook-rs
+make install
+```
+
+This builds the release binary and installs everything to `~/.local/`:
+
+| What | Where |
+|------|-------|
+| Binary | `~/.local/bin/fitslook` |
+| Icon | `~/.local/share/icons/hicolor/256x256/apps/fitslook.png` |
+| Desktop entry | `~/.local/share/applications/fitslook.desktop` |
+| MIME type | `~/.local/share/mime/packages/fitslook-fits.xml` |
+
+After install, `fitslook` will be available in your terminal (if `~/.local/bin` is in your PATH), in your app launcher, and in the "Open With" menu for `.fits` files.
+
+### Install script directly
+
+```bash
+cd fitslook-rs
+cargo build --release
+./install.sh                       # Install to ~/.local (user-local)
+sudo ./install.sh /usr/local       # Install system-wide
+```
+
+### Via cargo install
+
+```bash
+cd fitslook-rs
+cargo install --path .
+```
+
+This installs just the binary to `~/.cargo/bin/fitslook`. Desktop integration will be set up on first launch.
+
+### Uninstall
+
+```bash
+cd fitslook-rs
+make uninstall                     # Remove from ~/.local
+# OR
+./install.sh --uninstall           # Same thing
+sudo ./install.sh --uninstall /usr/local   # If installed system-wide
+```
+
+---
+
 ## Running
 
 ### Open a FITS file directly
