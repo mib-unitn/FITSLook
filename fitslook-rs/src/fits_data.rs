@@ -91,8 +91,16 @@ impl FitsDocument {
                 for card_idx in 0..(BLOCK_SIZE / 80) {
                     let start = card_idx * 80;
                     let card_bytes = &block[start..start + 80];
-                    let card_str =
-                        String::from_utf8_lossy(card_bytes).trim_end().to_string();
+
+                    // Skip cards that contain non-ASCII bytes (binary data, not a header)
+                    let is_ascii = card_bytes.iter().all(|&b| b.is_ascii());
+                    if !is_ascii {
+                        // If we're still in a header and hit binary, something is wrong
+                        // — just skip this card
+                        continue;
+                    }
+
+                    let card_str = String::from_utf8_lossy(card_bytes).trim_end().to_string();
                     if !card_str.is_empty() {
                         header_text.push_str(&card_str);
                         header_text.push('\n');
@@ -106,16 +114,20 @@ impl FitsDocument {
                         header_ended = true;
                         break;
                     }
-                    if card_str.len() > 10 && card_str.as_bytes().get(8) == Some(&b'=') {
-                        let value = card_str[10..]
-                            .split('/')
-                            .next()
-                            .unwrap_or("")
-                            .trim()
-                            .trim_matches('\'')
-                            .trim()
-                            .to_string();
-                        cards.insert(keyword, value);
+                    if card_str.len() > 10 {
+                        if let (Some(&eq), Some(value_part)) = (card_str.as_bytes().get(8), card_str.get(10..)) {
+                            if eq == b'=' {
+                                let value = value_part
+                                    .split('/')
+                                    .next()
+                                    .unwrap_or("")
+                                    .trim()
+                                    .trim_matches('\'')
+                                    .trim()
+                                    .to_string();
+                                cards.insert(keyword, value);
+                            }
+                        }
                     }
                 }
                 if header_ended {
