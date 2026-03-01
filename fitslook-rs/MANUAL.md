@@ -67,7 +67,7 @@ The binary will be at:
 
 ## Installing
 
-### Quick Install (recommended)
+### Quick Install — Linux (recommended)
 
 ```bash
 cd fitslook-rs
@@ -85,13 +85,32 @@ This builds the release binary and installs everything to `~/.local/`:
 
 After install, `fitslook` will be available in your terminal (if `~/.local/bin` is in your PATH), in your app launcher, and in the "Open With" menu for `.fits` files.
 
+### Quick Install — macOS
+
+```bash
+cd fitslook-rs
+cargo build --release
+./install.sh
+```
+
+This creates `/Applications/AstroFITS Explorer.app` with:
+- Proper `Info.plist` (name, icon, UTI declarations for `.fits` files)
+- Automatic `.icns` icon via `sips`/`iconutil`
+- Right-click "Open With" support for `.fits` files
+
+To uninstall on macOS:
+
+```bash
+./install.sh --uninstall
+```
+
 ### Install script directly
 
 ```bash
 cd fitslook-rs
 cargo build --release
-./install.sh                       # Install to ~/.local (user-local)
-sudo ./install.sh /usr/local       # Install system-wide
+./install.sh                       # Linux: ~/.local, macOS: /Applications
+sudo ./install.sh /usr/local       # Linux: system-wide
 ```
 
 ### Via cargo install
@@ -107,10 +126,9 @@ This installs just the binary to `~/.cargo/bin/fitslook`. Desktop integration wi
 
 ```bash
 cd fitslook-rs
-make uninstall                     # Remove from ~/.local
-# OR
-./install.sh --uninstall           # Same thing
-sudo ./install.sh --uninstall /usr/local   # If installed system-wide
+make uninstall                     # Remove from ~/.local (Linux)
+./install.sh --uninstall           # Same (Linux or macOS)
+sudo ./install.sh --uninstall /usr/local   # If installed system-wide (Linux)
 ```
 
 ---
