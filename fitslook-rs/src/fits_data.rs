@@ -92,11 +92,16 @@ impl FitsDocument {
                     let start = card_idx * 80;
                     let card_bytes = &block[start..start + 80];
 
-                    // Skip cards that contain non-ASCII bytes (binary data, not a header)
-                    let is_ascii = card_bytes.iter().all(|&b| b.is_ascii());
-                    if !is_ascii {
-                        // If we're still in a header and hit binary, something is wrong
-                        // — just skip this card
+                    // Check for END keyword first (before any trimming/conversion)
+                    if card_bytes.starts_with(b"END ") || card_bytes.starts_with(b"END\0")
+                        || &card_bytes[..3] == b"END" && card_bytes[3..].iter().all(|&b| b == b' ' || b == 0)
+                    {
+                        header_ended = true;
+                        break;
+                    }
+
+                    // Skip cards that aren't valid ASCII text
+                    if !card_bytes.iter().all(|&b| b.is_ascii()) {
                         continue;
                     }
 
@@ -105,15 +110,14 @@ impl FitsDocument {
                         header_text.push_str(&card_str);
                         header_text.push('\n');
                     }
+
+                    // Extract keyword (first 8 chars) and value
                     let keyword = card_str
                         .get(..8)
-                        .unwrap_or("")
+                        .unwrap_or(&card_str)
                         .trim()
                         .to_string();
-                    if keyword == "END" {
-                        header_ended = true;
-                        break;
-                    }
+
                     if card_str.len() > 10 {
                         if let (Some(&eq), Some(value_part)) = (card_str.as_bytes().get(8), card_str.get(10..)) {
                             if eq == b'=' {
