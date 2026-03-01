@@ -66,8 +66,16 @@ impl FitsDocument {
 
             loop {
                 let mut block = [0u8; BLOCK_SIZE];
-                let read_count = reader.read(&mut block).map_err(|e| format!("Read error: {e}"))?;
-                if read_count == 0 {
+                // Read a full FITS block (2880 bytes) — loop to handle partial reads
+                let mut filled = 0;
+                while filled < BLOCK_SIZE {
+                    match reader.read(&mut block[filled..]) {
+                        Ok(0) => break,  // EOF
+                        Ok(n) => filled += n,
+                        Err(e) => return Err(format!("Read error: {e}")),
+                    }
+                }
+                if filled == 0 {
                     // EOF before END card – we're done
                     if hdu_index == 0 {
                         return Err("Empty or invalid FITS file".into());
@@ -75,8 +83,8 @@ impl FitsDocument {
                     header_ended = true;
                     break;
                 }
-                // Pad remainder with spaces if partial read
-                for byte in block.iter_mut().skip(read_count) {
+                // Pad remainder with spaces if short block (end of file)
+                for byte in block.iter_mut().skip(filled) {
                     *byte = b' ';
                 }
                 // Parse 80-byte cards

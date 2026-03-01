@@ -89,6 +89,9 @@ pub struct FitsViewerApp {
 
     // Object name
     object_name: String,
+
+    // Pending file open (from drag-drop or dialog)
+    pending_open: Option<String>,
 }
 
 impl Default for FitsViewerApp {
@@ -119,6 +122,7 @@ impl Default for FitsViewerApp {
             errors: Vec::new(),
             mouse_info: "READY".to_string(),
             object_name: "--".to_string(),
+            pending_open: None,
         }
     }
 }
@@ -335,6 +339,19 @@ impl FitsViewerApp {
             self.needs_rerender = false;
         }
     }
+
+    /// Show a native file-open dialog for FITS files.
+    fn show_open_dialog(&mut self) {
+        let result = rfd::FileDialog::new()
+            .set_title("Open FITS File")
+            .add_filter("FITS files", &["fits", "fit", "fts"])
+            .add_filter("All files", &["*"])
+            .pick_file();
+        if let Some(path) = result {
+            let path_str = path.to_string_lossy().to_string();
+            self.open_file(&path_str);
+        }
+    }
 }
 
 // ── eframe::App implementation ───────────────────────────────────────────
@@ -353,6 +370,24 @@ impl eframe::App for FitsViewerApp {
         visuals.selection.stroke = Stroke::new(1.0, ACCENT);
         ctx.set_visuals(visuals);
 
+        // Handle Ctrl+O keyboard shortcut
+        if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::O)) {
+            self.show_open_dialog();
+        }
+
+        // Handle drag-and-drop
+        ctx.input(|i| {
+            for file in &i.raw.dropped_files {
+                if let Some(path) = &file.path {
+                    let path_str = path.to_string_lossy().to_string();
+                    self.pending_open = Some(path_str);
+                }
+            }
+        });
+        if let Some(path) = self.pending_open.take() {
+            self.open_file(&path);
+        }
+
         // Rebuild texture if needed
         if self.needs_rerender && self.view_mode == ViewMode::Image {
             self.rebuild_texture(ctx);
@@ -369,6 +404,17 @@ impl eframe::App for FitsViewerApp {
                 ..Default::default()
             })
             .show(ctx, |ui| {
+                // Open File button
+                if ui.add(
+                    egui::Button::new(RichText::new("📂 Open File").color(ACCENT).size(13.0))
+                        .fill(Color32::from_rgb(30, 37, 48))
+                        .corner_radius(CornerRadius::same(8))
+                        .min_size(Vec2::new(ui.available_width(), 32.0)),
+                ).clicked() {
+                    self.show_open_dialog();
+                }
+                ui.add_space(8.0);
+
                 ui.label(RichText::new("FILE STRUCTURE").color(ACCENT).strong().size(14.0));
                 ui.add_space(8.0);
 
@@ -608,12 +654,32 @@ impl eframe::App for FitsViewerApp {
                                 self.mouse_info = format!("X: {}  Y: {}", px, py);
                             }
                         } else {
-                            ui.centered_and_justified(|ui| {
+                            ui.vertical_centered(|ui| {
+                                ui.add_space(ui.available_height() / 3.0);
                                 ui.label(
-                                    RichText::new("Open a FITS file to view")
+                                    RichText::new("🔭")
+                                        .size(48.0),
+                                );
+                                ui.add_space(12.0);
+                                ui.label(
+                                    RichText::new("Drop a FITS file here")
                                         .color(TEXT_DIM)
                                         .size(18.0),
                                 );
+                                ui.label(
+                                    RichText::new("or press Ctrl+O / click Open File")
+                                        .color(TEXT_DIM)
+                                        .size(13.0),
+                                );
+                                ui.add_space(16.0);
+                                if ui.add(
+                                    egui::Button::new(RichText::new("📂 Open File").color(ACCENT).size(15.0))
+                                        .fill(Color32::from_rgb(30, 37, 48))
+                                        .corner_radius(CornerRadius::same(8))
+                                        .min_size(Vec2::new(200.0, 40.0)),
+                                ).clicked() {
+                                    self.show_open_dialog();
+                                }
                             });
                         }
                     }
