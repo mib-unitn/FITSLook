@@ -1,4 +1,4 @@
-# FITSLook-RS User Manual 🔭
+# FITSLook User Manual 🔭
 
 A professional, high-performance FITS file viewer for astronomy — rewritten in Rust with the `egui` GUI framework.
 
@@ -50,7 +50,6 @@ sudo apt install build-essential pkg-config libxkbcommon-dev libwayland-dev \
 ## Building from Source
 
 ```bash
-cd fitslook-rs
 
 # Debug build (fast compile, slower runtime)
 cargo build
@@ -70,7 +69,6 @@ The binary will be at:
 ### Quick Install — Linux (recommended)
 
 ```bash
-cd fitslook-rs
 make install
 ```
 
@@ -88,7 +86,6 @@ After install, `fitslook` will be available in your terminal (if `~/.local/bin` 
 ### Quick Install — macOS
 
 ```bash
-cd fitslook-rs
 cargo build --release
 ./install.sh
 ```
@@ -107,7 +104,6 @@ To uninstall on macOS:
 ### Install script directly
 
 ```bash
-cd fitslook-rs
 cargo build --release
 ./install.sh                       # Linux: ~/.local, macOS: /Applications
 sudo ./install.sh /usr/local       # Linux: system-wide
@@ -116,7 +112,6 @@ sudo ./install.sh /usr/local       # Linux: system-wide
 ### Via cargo install
 
 ```bash
-cd fitslook-rs
 cargo install --path .
 ```
 
@@ -125,7 +120,6 @@ This installs just the binary to `~/.cargo/bin/fitslook`. Desktop integration wi
 ### Uninstall
 
 ```bash
-cd fitslook-rs
 make uninstall                     # Remove from ~/.local (Linux)
 ./install.sh --uninstall           # Same (Linux or macOS)
 sudo ./install.sh --uninstall /usr/local   # If installed system-wide (Linux)

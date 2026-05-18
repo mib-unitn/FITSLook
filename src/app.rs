@@ -1,7 +1,7 @@
 use eframe::egui;
 use egui::{
-    Color32, CornerRadius, FontId, Frame, Margin, RichText, ScrollArea, Stroke, TextureHandle,
-    TextureOptions, Vec2,
+    Color32, CornerRadius, FontId, Frame, Margin, Pos2, Rect, RichText, ScrollArea, Stroke,
+    TextureHandle, TextureOptions, Vec2,
 };
 use egui_plot::{Line, Plot, PlotPoints, Polygon};
 use ndarray::Array2;
@@ -92,6 +92,16 @@ pub struct FitsViewerApp {
 
     // Pending file open (from drag-drop or dialog)
     pending_open: Option<String>,
+
+    // Zoom / Pan
+    zoom_level: f32,
+    pan_offset: Vec2,
+    fit_to_view: bool,
+
+    // Drag-to-zoom selection (screen coords)
+    drag_start: Option<Pos2>,
+    drag_end: Option<Pos2>,
+    is_panning: bool,
 }
 
 impl Default for FitsViewerApp {
@@ -123,6 +133,12 @@ impl Default for FitsViewerApp {
             mouse_info: "READY".to_string(),
             object_name: "--".to_string(),
             pending_open: None,
+            zoom_level: 1.0,
+            pan_offset: Vec2::ZERO,
+            fit_to_view: true,
+            drag_start: None,
+            drag_end: None,
+            is_panning: false,
         }
     }
 }
@@ -142,10 +158,19 @@ impl FitsViewerApp {
         let path = crate::platform::decode_file_uri(raw_path);
         match FitsDocument::open(&path) {
             Ok(doc) => {
-                // Find best initial HDU (prefer spectrum or first image with data)
+                // Find best initial HDU:
+                // 1. Start with the first HDU that actually has renderable image data
+                //    (handles files where PRIMARY has NAXIS=0 and the image is in HDU 1+)
+                // 2. Then override with a spectrum HDU if one is detected
                 let mut idx = 0;
+                let mut found_image = false;
                 for (i, hdu) in doc.hdus.iter().enumerate() {
-                    if hdu.is_image {
+                    if hdu.is_image && !hdu.shape.is_empty() && doc.images.contains_key(&i) {
+                        if !found_image {
+                            idx = i;
+                            found_image = true;
+                        }
+                        // Prefer spectrum HDUs over plain images
                         if hdu.header_cards.contains_key("WAVEMIN")
                             || (hdu.shape.len() == 2 && hdu.shape[1] < 10)
                         {
@@ -163,9 +188,19 @@ impl FitsViewerApp {
         }
     }
 
+    /// Reset zoom/pan to default.
+    fn reset_zoom(&mut self) {
+        self.zoom_level = 1.0;
+        self.pan_offset = Vec2::ZERO;
+        self.drag_start = None;
+        self.drag_end = None;
+        self.is_panning = false;
+    }
+
     /// Select an HDU by index and prepare the view.
     fn select_hdu(&mut self, index: usize) {
         self.selected_hdu = index;
+        self.reset_zoom();
         let doc = match &self.fits_doc {
             Some(d) => d,
             None => return,
@@ -462,18 +497,21 @@ impl eframe::App for FitsViewerApp {
                 ui.label(RichText::new("METADATA").color(ACCENT).strong().size(14.0));
                 ui.add_space(4.0);
 
-                ScrollArea::vertical().show(ui, |ui| {
-                    if let Some(doc) = &self.fits_doc {
-                        if let Some(hdu) = doc.hdus.get(self.selected_hdu) {
-                            ui.add(
-                                egui::TextEdit::multiline(&mut hdu.header_text.as_str())
-                                    .font(FontId::monospace(9.0))
-                                    .text_color(ACCENT_BLUE)
-                                    .desired_width(f32::INFINITY),
-                            );
+                ScrollArea::vertical()
+                    .id_salt("metadata_scroll")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        if let Some(doc) = &self.fits_doc {
+                            if let Some(hdu) = doc.hdus.get(self.selected_hdu) {
+                                ui.add(
+                                    egui::TextEdit::multiline(&mut hdu.header_text.as_str())
+                                        .font(FontId::monospace(9.0))
+                                        .text_color(ACCENT_BLUE)
+                                        .desired_width(f32::INFINITY),
+                                );
+                            }
                         }
-                    }
-                });
+                    });
             });
 
         // ── RIGHT PANEL ──────────────────────────────────────────────
@@ -600,6 +638,26 @@ impl eframe::App for FitsViewerApp {
                             self.update_image_view();
                         }
                     }
+
+                    // ── View controls ────────────────────────────────
+                    ui.add_space(20.0);
+                    ui.label(RichText::new("VIEW").color(ACCENT).strong().size(14.0));
+                    ui.add_space(4.0);
+
+                    ui.checkbox(&mut self.fit_to_view, RichText::new("Fit to View").color(TEXT_PRIMARY));
+
+                    ui.add_space(4.0);
+                    ui.label(RichText::new(format!("Zoom: {:.0}%", self.zoom_level * 100.0)).color(TEXT_DIM));
+                    ui.add_space(4.0);
+
+                    if ui.add(
+                        egui::Button::new(RichText::new("⟲ Reset Zoom").color(ACCENT).size(12.0))
+                            .fill(Color32::from_rgb(30, 37, 48))
+                            .corner_radius(CornerRadius::same(6))
+                            .min_size(Vec2::new(ui.available_width(), 28.0)),
+                    ).clicked() {
+                        self.reset_zoom();
+                    }
                 } else {
                     ui.label(RichText::new("No image controls").color(TEXT_DIM).italics());
                 }
@@ -636,49 +694,174 @@ impl eframe::App for FitsViewerApp {
                         if let Some(tex) = &self.texture {
                             let available = ui.available_size();
                             let tex_size = tex.size_vec2();
-                            let scale = (available.x / tex_size.x).min(available.y / tex_size.y).min(1.0);
-                            let display_size = tex_size * scale;
 
-                            let resp = ui.add(
-                                egui::Image::new(tex)
-                                    .fit_to_exact_size(display_size)
-                                    .sense(egui::Sense::hover()),
+                            // Compute base scale: fit-to-view removes the .min(1.0) clamp
+                            let base_scale = if self.fit_to_view {
+                                (available.x / tex_size.x).min(available.y / tex_size.y)
+                            } else {
+                                (available.x / tex_size.x).min(available.y / tex_size.y).min(1.0)
+                            };
+                            let effective_scale = base_scale * self.zoom_level;
+                            let display_size = tex_size * effective_scale;
+
+                            // Allocate the full available area for interaction
+                            let (resp, mut painter) = ui.allocate_painter(
+                                available,
+                                egui::Sense::click_and_drag(),
+                            );
+                            let canvas_rect = resp.rect;
+
+                            // Image rect centered in canvas, offset by pan
+                            let center = canvas_rect.center() + self.pan_offset;
+                            let img_rect = Rect::from_center_size(center.into(), display_size);
+
+                            // Clip and draw the image
+                            painter.set_clip_rect(canvas_rect);
+                            painter.image(
+                                tex.id(),
+                                img_rect,
+                                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                                Color32::WHITE,
                             );
 
+                            // ── Scroll-wheel zoom (centered on cursor) ──
+                            let scroll_delta = ctx.input(|i| i.smooth_scroll_delta.y);
+                            if scroll_delta.abs() > 0.1 && resp.hovered() {
+                                let zoom_factor = if scroll_delta > 0.0 { 1.1 } else { 1.0 / 1.1 };
+                                let old_zoom = self.zoom_level;
+                                self.zoom_level = (self.zoom_level * zoom_factor).clamp(0.1, 50.0);
+                                // Zoom toward the cursor position
+                                if let Some(cursor) = resp.hover_pos() {
+                                    let cursor_vec = Vec2::new(cursor.x, cursor.y) - Vec2::new(center.x, center.y);
+                                    let ratio = 1.0 - self.zoom_level / old_zoom;
+                                    self.pan_offset += cursor_vec * ratio;
+                                }
+                                self.fit_to_view = false; // manual zoom overrides fit
+                            }
+
+                            // ── Double-click to reset ──
+                            if resp.double_clicked() {
+                                self.reset_zoom();
+                            }
+
+                            // ── Middle-click pan ──
+                            if resp.dragged_by(egui::PointerButton::Middle) {
+                                self.pan_offset += resp.drag_delta();
+                                self.is_panning = true;
+                            }
+                            if resp.drag_stopped_by(egui::PointerButton::Middle) {
+                                self.is_panning = false;
+                            }
+
+                            // ── Left-click drag-to-zoom ──
+                            if resp.dragged_by(egui::PointerButton::Primary) && !self.is_panning {
+                                if self.drag_start.is_none() {
+                                    if let Some(pos) = resp.interact_pointer_pos() {
+                                        self.drag_start = Some(pos);
+                                    }
+                                }
+                                if let Some(pos) = resp.interact_pointer_pos() {
+                                    self.drag_end = Some(pos);
+                                }
+                            }
+
+                            // Draw selection rectangle
+                            if let (Some(start), Some(end)) = (self.drag_start, self.drag_end) {
+                                let sel_rect = Rect::from_two_pos(start, end);
+                                if sel_rect.width() > 4.0 && sel_rect.height() > 4.0 {
+                                    painter.rect_filled(
+                                        sel_rect,
+                                        0.0,
+                                        Color32::from_rgba_premultiplied(88, 166, 255, 30),
+                                    );
+                                    painter.rect_stroke(
+                                        sel_rect,
+                                        0.0,
+                                        Stroke::new(1.5, ACCENT),
+                                        egui::StrokeKind::Outside,
+                                    );
+                                }
+                            }
+
+                            // Commit drag-to-zoom on release
+                            if resp.drag_stopped_by(egui::PointerButton::Primary) && !self.is_panning {
+                                if let (Some(start), Some(end)) = (self.drag_start, self.drag_end) {
+                                    let sel = Rect::from_two_pos(start, end);
+                                    if sel.width() > 8.0 && sel.height() > 8.0 {
+                                        // Compute zoom factor from selection
+                                        let zoom_x = canvas_rect.width() / sel.width();
+                                        let zoom_y = canvas_rect.height() / sel.height();
+                                        let extra_zoom = zoom_x.min(zoom_y);
+
+                                        // Pan so the selection center becomes the canvas center
+                                        let sel_center = sel.center();
+                                        let canvas_center = canvas_rect.center();
+                                        let offset_before = Vec2::new(
+                                            sel_center.x - canvas_center.x,
+                                            sel_center.y - canvas_center.y,
+                                        );
+
+                                        self.pan_offset = (self.pan_offset - offset_before) * extra_zoom;
+                                        self.zoom_level = (self.zoom_level * extra_zoom).clamp(0.1, 50.0);
+                                        self.fit_to_view = false;
+                                    }
+                                }
+                                self.drag_start = None;
+                                self.drag_end = None;
+                            }
+
+                            // ── Mouse coordinate tracking ──
                             if let Some(pos) = resp.hover_pos() {
-                                let rect = resp.rect;
-                                let frac_x = (pos.x - rect.left()) / rect.width();
-                                let frac_y = (pos.y - rect.top()) / rect.height();
-                                let px = (frac_x * tex_size.x) as i32;
-                                let py = ((1.0 - frac_y) * tex_size.y) as i32; // flip Y
-                                self.mouse_info = format!("X: {}  Y: {}", px, py);
+                                // Convert screen pos → image pixel
+                                let frac_x = (pos.x - img_rect.left()) / img_rect.width();
+                                let frac_y = (pos.y - img_rect.top()) / img_rect.height();
+                                if frac_x >= 0.0 && frac_x <= 1.0 && frac_y >= 0.0 && frac_y <= 1.0 {
+                                    let px = (frac_x * tex_size.x) as i32;
+                                    let py = ((1.0 - frac_y) * tex_size.y) as i32;
+                                    self.mouse_info = format!("X: {}  Y: {}  | Zoom: {:.0}%", px, py, self.zoom_level * 100.0);
+                                } else {
+                                    self.mouse_info = format!("Zoom: {:.0}%", self.zoom_level * 100.0);
+                                }
                             }
                         } else {
                             ui.vertical_centered(|ui| {
                                 ui.add_space(ui.available_height() / 3.0);
-                                ui.label(
-                                    RichText::new("🔭")
-                                        .size(48.0),
-                                );
-                                ui.add_space(12.0);
-                                ui.label(
-                                    RichText::new("Drop a FITS file here")
-                                        .color(TEXT_DIM)
-                                        .size(18.0),
-                                );
-                                ui.label(
-                                    RichText::new("or press Ctrl+O / click Open File")
-                                        .color(TEXT_DIM)
-                                        .size(13.0),
-                                );
-                                ui.add_space(16.0);
-                                if ui.add(
-                                    egui::Button::new(RichText::new("📂 Open File").color(ACCENT).size(15.0))
-                                        .fill(Color32::from_rgb(30, 37, 48))
-                                        .corner_radius(CornerRadius::same(8))
-                                        .min_size(Vec2::new(200.0, 40.0)),
-                                ).clicked() {
-                                    self.show_open_dialog();
+                                if self.fits_doc.is_some() {
+                                    // File is open but this HDU can't be rendered (e.g. compressed)
+                                    ui.label(RichText::new("🗜").size(48.0));
+                                    ui.add_space(12.0);
+                                    ui.label(
+                                        RichText::new("Compressed image — not yet supported")
+                                            .color(TEXT_DIM)
+                                            .size(18.0),
+                                    );
+                                    ui.label(
+                                        RichText::new("Header data is available in the left panel")
+                                            .color(TEXT_DIM)
+                                            .size(13.0),
+                                    );
+                                } else {
+                                    ui.label(RichText::new("🔭").size(48.0));
+                                    ui.add_space(12.0);
+                                    ui.label(
+                                        RichText::new("Drop a FITS file here")
+                                            .color(TEXT_DIM)
+                                            .size(18.0),
+                                    );
+                                    ui.label(
+                                        RichText::new("or press Ctrl+O / click Open File")
+                                            .color(TEXT_DIM)
+                                            .size(13.0),
+                                    );
+                                    ui.add_space(16.0);
+                                    if ui.add(
+                                        egui::Button::new(RichText::new("📂 Open File").color(ACCENT).size(15.0))
+                                            .fill(Color32::from_rgb(30, 37, 48))
+                                            .corner_radius(CornerRadius::same(8))
+                                            .min_size(Vec2::new(200.0, 40.0)),
+                                    ).clicked() {
+                                        self.show_open_dialog();
+                                    }
                                 }
                             });
                         }

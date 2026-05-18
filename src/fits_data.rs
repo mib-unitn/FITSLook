@@ -1,4 +1,5 @@
 use byteorder::{BigEndian, ReadBytesExt};
+use log::warn;
 use ndarray::{Array2, Array3};
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -167,8 +168,12 @@ impl FitsDocument {
                 .cloned()
                 .unwrap_or_default()
                 .to_uppercase();
+            // A BINTABLE with ZIMAGE=T is a compressed image extension — treat as image
+            let is_compressed_image = xtension.contains("BINTABLE")
+                && cards.get("ZIMAGE").map(|v| v.trim().eq_ignore_ascii_case("T")).unwrap_or(false);
             let is_image = xtension.is_empty()
                 || xtension.contains("IMAGE")
+                || is_compressed_image
                 || (hdu_index == 0 && !xtension.contains("TABLE"));
 
             let ext_name = cards
@@ -192,18 +197,74 @@ impl FitsDocument {
             };
 
             // ---- Compute data size & read data ----
+            // Squeeze trailing singleton dimensions (e.g. 4D with NAXIS3=1, NAXIS4=1 → 2D)
+            let mut squeezed_shape = shape.clone();
+            while squeezed_shape.len() > 2 {
+                if let Some(&last) = squeezed_shape.last() {
+                    if last == 1 {
+                        squeezed_shape.pop();
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            // Check for compressed image extensions
+            if xtension.contains("COMPRESSED") || xtension.contains("COMPIMAGE") {
+                warn!("Compressed image extension at HDU {hdu_index} — not yet supported, skipping data");
+                // Still record the HDU for header viewing
+                let total_pixels: usize = shape.iter().product();
+                let bytes_per_pixel = if bitpix != 0 { (bitpix.unsigned_abs() as usize) / 8 } else { 0 };
+                let data_bytes = total_pixels * bytes_per_pixel;
+                let padded_data_bytes = ((data_bytes + BLOCK_SIZE - 1) / BLOCK_SIZE) * BLOCK_SIZE;
+                if padded_data_bytes > 0 {
+                    reader.seek(SeekFrom::Current(padded_data_bytes as i64)).ok();
+                }
+                hdus.push(hdu_info);
+                hdu_index += 1;
+                continue;
+            }
+
             let total_pixels: usize = shape.iter().product();
-            let bytes_per_pixel = (bitpix.unsigned_abs() as usize) / 8;
+            let bytes_per_pixel = if bitpix != 0 { (bitpix.unsigned_abs() as usize) / 8 } else { 0 };
             let data_bytes = total_pixels * bytes_per_pixel;
 
             // Align to FITS block boundary
             let data_blocks = (data_bytes + BLOCK_SIZE - 1) / BLOCK_SIZE;
             let padded_data_bytes = data_blocks * BLOCK_SIZE;
 
+            // Check remaining file size to avoid panicking on truncated files
+            let current_pos = reader.stream_position().unwrap_or(0);
+            let file_end = reader.seek(SeekFrom::End(0)).unwrap_or(current_pos);
+            reader.seek(SeekFrom::Start(current_pos)).ok();
+            let remaining = file_end.saturating_sub(current_pos) as usize;
+
             if is_image && naxis > 0 && total_pixels > 0 {
+                if data_bytes > remaining {
+                    warn!(
+                        "HDU {hdu_index}: data requires {data_bytes} bytes but only {remaining} remain — keeping header only"
+                    );
+                    if remaining > 0 {
+                        reader.seek(SeekFrom::Current(remaining as i64)).ok();
+                    }
+                    hdus.push(hdu_info);
+                    hdu_index += 1;
+                    continue;
+                }
+
                 // Read image data
                 let mut raw = vec![0u8; data_bytes];
-                reader.read_exact(&mut raw).map_err(|e| format!("Data read error: {e}"))?;
+                match reader.read_exact(&mut raw) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        warn!("HDU {hdu_index}: data read error ({e}) — keeping header only");
+                        hdus.push(hdu_info);
+                        hdu_index += 1;
+                        continue;
+                    }
+                }
                 // Skip padding
                 let pad = padded_data_bytes - data_bytes;
                 if pad > 0 {
@@ -213,23 +274,38 @@ impl FitsDocument {
                 let pixels = read_pixels(&raw, bitpix, total_pixels);
                 let bscale: f64 = cards.get("BSCALE").and_then(|v| v.parse().ok()).unwrap_or(1.0);
                 let bzero: f64 = cards.get("BZERO").and_then(|v| v.parse().ok()).unwrap_or(0.0);
+
+                // Handle BLANK keyword for integer data: pixels matching BLANK → NaN
+                let blank_val: Option<i64> = if bitpix > 0 {
+                    cards.get("BLANK").and_then(|v| v.parse().ok())
+                } else {
+                    None
+                };
+
                 let pixels: Vec<f64> = pixels.iter().map(|&v| {
+                    // Check BLANK before applying BSCALE/BZERO
+                    if let Some(bv) = blank_val {
+                        if (v as i64) == bv {
+                            return f64::NAN;
+                        }
+                    }
                     let val = v * bscale + bzero;
                     if val.is_nan() || val.is_infinite() { 0.0 } else { val }
                 }).collect();
 
                 // FITS stores data in FORTRAN order (first axis varies fastest in memory)
                 // shape = [NAXIS1, NAXIS2, ...] where NAXIS1 is the fastest-varying axis
-                let img_data = if shape.len() == 1 {
+                // Use squeezed_shape for array construction to handle 4D+ with trailing 1s
+                let img_data = if squeezed_shape.len() == 1 {
                     ImageData::Spectrum1D(pixels)
-                } else if shape.len() == 2 {
-                    let (nx, ny) = (shape[0], shape[1]);
+                } else if squeezed_shape.len() == 2 {
+                    let (nx, ny) = (squeezed_shape[0], squeezed_shape[1]);
                     // Data is stored row-major from FITS perspective: ny rows of nx columns
                     let arr = Array2::from_shape_vec((ny, nx), pixels)
                         .map_err(|e| format!("Shape error: {e}"))?;
                     ImageData::Image2D(arr)
-                } else if shape.len() >= 3 {
-                    let (nx, ny, nz) = (shape[0], shape[1], shape[2]);
+                } else if squeezed_shape.len() >= 3 {
+                    let (nx, ny, nz) = (squeezed_shape[0], squeezed_shape[1], squeezed_shape[2]);
                     // For cubes: nz frames of ny×nx images
                     let arr = Array3::from_shape_vec((nz, ny, nx), pixels)
                         .map_err(|e| format!("Shape error: {e}"))?;
@@ -240,8 +316,27 @@ impl FitsDocument {
                 images.insert(hdu_index, img_data);
             } else if !is_image && naxis > 0 && data_bytes > 0 {
                 // Table – we read raw bytes, try to parse column names from TFORMn / TTYPEn
+                if data_bytes > remaining {
+                    warn!(
+                        "HDU {hdu_index}: table data requires {data_bytes} bytes but only {remaining} remain — keeping header only"
+                    );
+                    if remaining > 0 {
+                        reader.seek(SeekFrom::Current(remaining as i64)).ok();
+                    }
+                    hdus.push(hdu_info);
+                    hdu_index += 1;
+                    continue;
+                }
                 let mut raw = vec![0u8; data_bytes];
-                reader.read_exact(&mut raw).map_err(|e| format!("Table read error: {e}"))?;
+                match reader.read_exact(&mut raw) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        warn!("HDU {hdu_index}: table read error ({e}) — keeping header only");
+                        hdus.push(hdu_info);
+                        hdu_index += 1;
+                        continue;
+                    }
+                }
                 let pad = padded_data_bytes - data_bytes;
                 if pad > 0 {
                     reader.seek(SeekFrom::Current(pad as i64)).ok();
@@ -369,6 +464,10 @@ fn parse_bintable_col_sizes(formats: &[String]) -> Vec<usize> {
                 'J' | 'E' => 4,
                 'K' | 'D' | 'C' => 8,
                 'M' => 16,
+                // Variable-length array descriptor: P=32-bit offset+length (8 bytes),
+                // Q=64-bit offset+length (16 bytes)
+                'P' => return 8,
+                'Q' => return 16,
                 _ => 4,
             };
             repeat * elem_size
