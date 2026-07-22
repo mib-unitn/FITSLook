@@ -659,6 +659,31 @@ impl eframe::App for FitsViewerApp {
                 ..Default::default()
             })
             .show(ctx, |ui| {
+                ui.label(
+                    RichText::new("APPEARANCE")
+                        .color(palette.accent)
+                        .strong()
+                        .size(14.0),
+                );
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Theme").color(palette.text_primary));
+                    egui::ComboBox::from_id_salt("theme_combo_right")
+                        .selected_text(match self.ui_theme {
+                            UiTheme::Dark => "Dark",
+                            UiTheme::RomaLight => "Light (Roma)",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.ui_theme, UiTheme::Dark, "Dark");
+                            ui.selectable_value(
+                                &mut self.ui_theme,
+                                UiTheme::RomaLight,
+                                "Light (Roma)",
+                            );
+                        });
+                });
+                ui.add_space(12.0);
+
                 if self.view_mode == ViewMode::Image {
                     // ── Visualization controls ───────────────────────
                     ui.label(
