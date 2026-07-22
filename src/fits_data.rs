@@ -71,7 +71,7 @@ impl FitsDocument {
                 let mut filled = 0;
                 while filled < BLOCK_SIZE {
                     match reader.read(&mut block[filled..]) {
-                        Ok(0) => break,  // EOF
+                        Ok(0) => break, // EOF
                         Ok(n) => filled += n,
                         Err(e) => return Err(format!("Read error: {e}")),
                     }
@@ -94,16 +94,13 @@ impl FitsDocument {
                     let card_bytes = &block[start..start + 80];
 
                     // Check for END keyword first (before any trimming/conversion)
-                    if card_bytes.starts_with(b"END ") || card_bytes.starts_with(b"END\0")
-                        || &card_bytes[..3] == b"END" && card_bytes[3..].iter().all(|&b| b == b' ' || b == 0)
+                    if card_bytes.starts_with(b"END ")
+                        || card_bytes.starts_with(b"END\0")
+                        || &card_bytes[..3] == b"END"
+                            && card_bytes[3..].iter().all(|&b| b == b' ' || b == 0)
                     {
                         header_ended = true;
                         break;
-                    }
-
-                    // Skip cards that aren't valid ASCII text
-                    if !card_bytes.iter().all(|&b| b.is_ascii()) {
-                        continue;
                     }
 
                     let card_str = String::from_utf8_lossy(card_bytes).trim_end().to_string();
@@ -112,27 +109,8 @@ impl FitsDocument {
                         header_text.push('\n');
                     }
 
-                    // Extract keyword (first 8 chars) and value
-                    let keyword = card_str
-                        .get(..8)
-                        .unwrap_or(&card_str)
-                        .trim()
-                        .to_string();
-
-                    if card_str.len() > 10 {
-                        if let (Some(&eq), Some(value_part)) = (card_str.as_bytes().get(8), card_str.get(10..)) {
-                            if eq == b'=' {
-                                let value = value_part
-                                    .split('/')
-                                    .next()
-                                    .unwrap_or("")
-                                    .trim()
-                                    .trim_matches('\'')
-                                    .trim()
-                                    .to_string();
-                                cards.insert(keyword, value);
-                            }
-                        }
+                    if let Some((keyword, value)) = parse_card_key_value(&card_str) {
+                        cards.insert(keyword, value);
                     }
                 }
                 if header_ended {
@@ -152,10 +130,7 @@ impl FitsDocument {
                 .get("BITPIX")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0);
-            let naxis: usize = cards
-                .get("NAXIS")
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0);
+            let naxis: usize = cards.get("NAXIS").and_then(|v| v.parse().ok()).unwrap_or(0);
             let mut shape = Vec::new();
             for i in 1..=naxis {
                 let key = format!("NAXIS{i}");
@@ -170,22 +145,22 @@ impl FitsDocument {
                 .to_uppercase();
             // A BINTABLE with ZIMAGE=T is a compressed image extension — treat as image
             let is_compressed_image = xtension.contains("BINTABLE")
-                && cards.get("ZIMAGE").map(|v| v.trim().eq_ignore_ascii_case("T")).unwrap_or(false);
+                && cards
+                    .get("ZIMAGE")
+                    .map(|v| v.trim().eq_ignore_ascii_case("T"))
+                    .unwrap_or(false);
             let is_image = xtension.is_empty()
                 || xtension.contains("IMAGE")
                 || is_compressed_image
                 || (hdu_index == 0 && !xtension.contains("TABLE"));
 
-            let ext_name = cards
-                .get("EXTNAME")
-                .cloned()
-                .unwrap_or_else(|| {
-                    if hdu_index == 0 {
-                        "PRIMARY".to_string()
-                    } else {
-                        format!("EXT_{hdu_index}")
-                    }
-                });
+            let ext_name = cards.get("EXTNAME").cloned().unwrap_or_else(|| {
+                if hdu_index == 0 {
+                    "PRIMARY".to_string()
+                } else {
+                    format!("EXT_{hdu_index}")
+                }
+            });
 
             let hdu_info = HduInfo {
                 index: hdu_index,
@@ -216,11 +191,17 @@ impl FitsDocument {
                 warn!("Compressed image extension at HDU {hdu_index} — not yet supported, skipping data");
                 // Still record the HDU for header viewing
                 let total_pixels: usize = shape.iter().product();
-                let bytes_per_pixel = if bitpix != 0 { (bitpix.unsigned_abs() as usize) / 8 } else { 0 };
+                let bytes_per_pixel = if bitpix != 0 {
+                    (bitpix.unsigned_abs() as usize) / 8
+                } else {
+                    0
+                };
                 let data_bytes = total_pixels * bytes_per_pixel;
                 let padded_data_bytes = ((data_bytes + BLOCK_SIZE - 1) / BLOCK_SIZE) * BLOCK_SIZE;
                 if padded_data_bytes > 0 {
-                    reader.seek(SeekFrom::Current(padded_data_bytes as i64)).ok();
+                    reader
+                        .seek(SeekFrom::Current(padded_data_bytes as i64))
+                        .ok();
                 }
                 hdus.push(hdu_info);
                 hdu_index += 1;
@@ -228,7 +209,11 @@ impl FitsDocument {
             }
 
             let total_pixels: usize = shape.iter().product();
-            let bytes_per_pixel = if bitpix != 0 { (bitpix.unsigned_abs() as usize) / 8 } else { 0 };
+            let bytes_per_pixel = if bitpix != 0 {
+                (bitpix.unsigned_abs() as usize) / 8
+            } else {
+                0
+            };
             let data_bytes = total_pixels * bytes_per_pixel;
 
             // Align to FITS block boundary
@@ -272,8 +257,8 @@ impl FitsDocument {
                 }
 
                 let pixels = read_pixels(&raw, bitpix, total_pixels);
-                let bscale: f64 = cards.get("BSCALE").and_then(|v| v.parse().ok()).unwrap_or(1.0);
-                let bzero: f64 = cards.get("BZERO").and_then(|v| v.parse().ok()).unwrap_or(0.0);
+                let bscale: f64 = parse_fits_float_card(&cards, "BSCALE").unwrap_or(1.0);
+                let bzero: f64 = parse_fits_float_card(&cards, "BZERO").unwrap_or(0.0);
 
                 // Handle BLANK keyword for integer data: pixels matching BLANK → NaN
                 let blank_val: Option<i64> = if bitpix > 0 {
@@ -282,16 +267,23 @@ impl FitsDocument {
                     None
                 };
 
-                let pixels: Vec<f64> = pixels.iter().map(|&v| {
-                    // Check BLANK before applying BSCALE/BZERO
-                    if let Some(bv) = blank_val {
-                        if (v as i64) == bv {
-                            return f64::NAN;
+                let pixels: Vec<f64> = pixels
+                    .iter()
+                    .map(|&v| {
+                        // Check BLANK before applying BSCALE/BZERO
+                        if let Some(bv) = blank_val {
+                            if (v as i64) == bv {
+                                return f64::NAN;
+                            }
                         }
-                    }
-                    let val = v * bscale + bzero;
-                    if val.is_nan() || val.is_infinite() { 0.0 } else { val }
-                }).collect();
+                        let val = v * bscale + bzero;
+                        if val.is_nan() || val.is_infinite() {
+                            0.0
+                        } else {
+                            val
+                        }
+                    })
+                    .collect();
 
                 // FITS stores data in FORTRAN order (first axis varies fastest in memory)
                 // shape = [NAXIS1, NAXIS2, ...] where NAXIS1 is the fastest-varying axis
@@ -342,13 +334,22 @@ impl FitsDocument {
                     reader.seek(SeekFrom::Current(pad as i64)).ok();
                 }
 
-                let tfields: usize = cards.get("TFIELDS").and_then(|v| v.parse().ok()).unwrap_or(0);
-                let nrows: usize = cards.get("NAXIS2").and_then(|v| v.parse().ok()).unwrap_or(0);
+                let tfields: usize = cards
+                    .get("TFIELDS")
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0);
+                let nrows: usize = cards
+                    .get("NAXIS2")
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0);
 
                 let mut columns = Vec::new();
                 let mut col_formats = Vec::new();
                 for i in 1..=tfields {
-                    let name = cards.get(&format!("TTYPE{i}")).cloned().unwrap_or_else(|| format!("COL_{i}"));
+                    let name = cards
+                        .get(&format!("TTYPE{i}"))
+                        .cloned()
+                        .unwrap_or_else(|| format!("COL_{i}"));
                     columns.push(name);
                     let fmt = cards.get(&format!("TFORM{i}")).cloned().unwrap_or_default();
                     col_formats.push(fmt);
@@ -356,7 +357,10 @@ impl FitsDocument {
 
                 // Parse binary or ASCII table rows
                 let is_bintable = xtension.contains("BINTABLE");
-                let row_bytes: usize = cards.get("NAXIS1").and_then(|v| v.parse().ok()).unwrap_or(0);
+                let row_bytes: usize = cards
+                    .get("NAXIS1")
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0);
 
                 let mut rows: Vec<Vec<String>> = Vec::new();
                 let max_rows = nrows.min(500); // Limit for display
@@ -387,7 +391,8 @@ impl FitsDocument {
                         let end = (start + row_bytes).min(raw.len());
                         let line = String::from_utf8_lossy(&raw[start..end]).to_string();
                         // Split by column width — simplified: just split by whitespace
-                        let vals: Vec<String> = line.split_whitespace().map(|s| s.to_string()).collect();
+                        let vals: Vec<String> =
+                            line.split_whitespace().map(|s| s.to_string()).collect();
                         rows.push(vals);
                     }
                 }
@@ -396,7 +401,9 @@ impl FitsDocument {
             } else {
                 // Skip data block
                 if padded_data_bytes > 0 {
-                    reader.seek(SeekFrom::Current(padded_data_bytes as i64)).ok();
+                    reader
+                        .seek(SeekFrom::Current(padded_data_bytes as i64))
+                        .ok();
                 }
             }
 
@@ -475,6 +482,47 @@ fn parse_bintable_col_sizes(formats: &[String]) -> Vec<usize> {
         .collect()
 }
 
+fn parse_card_key_value(card_str: &str) -> Option<(String, String)> {
+    let raw_keyword = card_str.get(..8).unwrap_or(card_str).trim();
+    if raw_keyword.is_empty() {
+        return None;
+    }
+
+    let value_part = if card_str.as_bytes().get(8) == Some(&b'=') {
+        card_str.get(10..)
+    } else {
+        card_str.split_once('=').map(|(_, value)| value)
+    }?;
+
+    let keyword = raw_keyword.to_ascii_uppercase();
+    let value = extract_value_before_comment(value_part);
+    Some((keyword, value))
+}
+
+fn extract_value_before_comment(value_part: &str) -> String {
+    let mut in_quotes = false;
+    for (idx, ch) in value_part.char_indices() {
+        if ch == '\'' {
+            in_quotes = !in_quotes;
+        } else if ch == '/' && !in_quotes {
+            return value_part[..idx]
+                .trim()
+                .trim_matches('\'')
+                .trim()
+                .to_string();
+        }
+    }
+
+    value_part.trim().trim_matches('\'').trim().to_string()
+}
+
+fn parse_fits_float_card(cards: &BTreeMap<String, String>, key: &str) -> Option<f64> {
+    let raw = cards.get(key)?;
+    raw.parse::<f64>()
+        .ok()
+        .or_else(|| raw.replace('D', "E").replace('d', "e").parse::<f64>().ok())
+}
+
 /// Read a single cell value from a binary table.
 fn read_bintable_cell(bytes: &[u8], fmt: &str) -> String {
     let fmt = fmt.trim();
@@ -482,7 +530,11 @@ fn read_bintable_cell(bytes: &[u8], fmt: &str) -> String {
         return String::new();
     }
     let type_char = fmt.chars().last().unwrap().to_ascii_uppercase();
-    let repeat_str = if fmt.len() > 1 { &fmt[..fmt.len() - 1] } else { "1" };
+    let repeat_str = if fmt.len() > 1 {
+        &fmt[..fmt.len() - 1]
+    } else {
+        "1"
+    };
     let repeat: usize = repeat_str.parse().unwrap_or(1);
 
     match type_char {

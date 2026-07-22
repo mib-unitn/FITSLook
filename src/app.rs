@@ -10,15 +10,70 @@ use crate::fits_data::{FitsDocument, ImageData};
 use crate::rendering::{self, COLORMAP_NAMES};
 use crate::spectrum;
 
-// ── Color palette (matches the Python "Liquid Glass" dark theme) ─────────
-const BG_MAIN: Color32 = Color32::from_rgb(13, 17, 23);
-const BG_PANEL: Color32 = Color32::from_rgb(22, 27, 34);
-const BORDER: Color32 = Color32::from_rgb(48, 54, 61);
-const TEXT_PRIMARY: Color32 = Color32::from_rgb(201, 209, 217);
-const TEXT_DIM: Color32 = Color32::from_rgb(139, 148, 158);
-const ACCENT: Color32 = Color32::from_rgb(88, 166, 255);
-const ACCENT_BLUE: Color32 = Color32::from_rgb(121, 192, 255);
-const SPECTRUM_CYAN: Color32 = Color32::from_rgb(0, 240, 255);
+#[derive(Clone, Copy)]
+struct ThemePalette {
+    bg_main: Color32,
+    bg_panel: Color32,
+    border: Color32,
+    text_primary: Color32,
+    text_dim: Color32,
+    accent: Color32,
+    accent_secondary: Color32,
+    spectrum_line: Color32,
+    button_fill: Color32,
+    widget_inactive_fill: Color32,
+    widget_hovered_fill: Color32,
+    widget_active_fill: Color32,
+    selection_fill: Color32,
+}
+
+const DARK_PALETTE: ThemePalette = ThemePalette {
+    bg_main: Color32::from_rgb(13, 17, 23),
+    bg_panel: Color32::from_rgb(22, 27, 34),
+    border: Color32::from_rgb(48, 54, 61),
+    text_primary: Color32::from_rgb(201, 209, 217),
+    text_dim: Color32::from_rgb(139, 148, 158),
+    accent: Color32::from_rgb(88, 166, 255),
+    accent_secondary: Color32::from_rgb(121, 192, 255),
+    spectrum_line: Color32::from_rgb(0, 240, 255),
+    button_fill: Color32::from_rgb(30, 37, 48),
+    widget_inactive_fill: Color32::from_rgb(13, 17, 23),
+    widget_hovered_fill: Color32::from_rgb(30, 37, 48),
+    widget_active_fill: Color32::from_rgb(40, 50, 65),
+    selection_fill: Color32::from_rgba_premultiplied(88, 166, 255, 40),
+};
+
+// Warm ivory + giallorosso accents (AS Roma-inspired light theme).
+const ROMA_LIGHT_PALETTE: ThemePalette = ThemePalette {
+    bg_main: Color32::from_rgb(250, 245, 236),
+    bg_panel: Color32::from_rgb(255, 251, 244),
+    border: Color32::from_rgb(216, 195, 158),
+    text_primary: Color32::from_rgb(52, 37, 28),
+    text_dim: Color32::from_rgb(123, 96, 74),
+    accent: Color32::from_rgb(133, 31, 49),
+    accent_secondary: Color32::from_rgb(180, 130, 24),
+    spectrum_line: Color32::from_rgb(133, 31, 49),
+    button_fill: Color32::from_rgb(246, 235, 219),
+    widget_inactive_fill: Color32::from_rgb(244, 234, 218),
+    widget_hovered_fill: Color32::from_rgb(236, 219, 196),
+    widget_active_fill: Color32::from_rgb(226, 204, 175),
+    selection_fill: Color32::from_rgba_premultiplied(133, 31, 49, 38),
+};
+
+#[derive(Clone, Copy, PartialEq)]
+enum UiTheme {
+    Dark,
+    RomaLight,
+}
+
+impl UiTheme {
+    fn palette(self) -> ThemePalette {
+        match self {
+            UiTheme::Dark => DARK_PALETTE,
+            UiTheme::RomaLight => ROMA_LIGHT_PALETTE,
+        }
+    }
+}
 
 // ── Normalization algorithms ─────────────────────────────────────────────
 const NORM_NAMES: [&str; 5] = ["Linear (ZScale)", "Log", "Sqrt", "Asinh", "Power"];
@@ -102,6 +157,7 @@ pub struct FitsViewerApp {
     drag_start: Option<Pos2>,
     drag_end: Option<Pos2>,
     is_panning: bool,
+    ui_theme: UiTheme,
 }
 
 impl Default for FitsViewerApp {
@@ -139,6 +195,7 @@ impl Default for FitsViewerApp {
             drag_start: None,
             drag_end: None,
             is_panning: false,
+            ui_theme: UiTheme::Dark,
         }
     }
 }
@@ -301,7 +358,9 @@ impl FitsViewerApp {
                 if self.collapse_mode {
                     match INTEG_METHODS[self.integ_index] {
                         "Sum" => cube.sum_axis(ndarray::Axis(0)),
-                        "Mean" => cube.mean_axis(ndarray::Axis(0)).unwrap_or_else(|| cube.sum_axis(ndarray::Axis(0))),
+                        "Mean" => cube
+                            .mean_axis(ndarray::Axis(0))
+                            .unwrap_or_else(|| cube.sum_axis(ndarray::Axis(0))),
                         "Max" => {
                             let shape = (cube.shape()[1], cube.shape()[2]);
                             let mut result = Array2::from_elem(shape, f64::NEG_INFINITY);
@@ -332,8 +391,12 @@ impl FitsViewerApp {
         let mut dmax = f64::MIN;
         for &v in view.iter() {
             if v.is_finite() {
-                if v < dmin { dmin = v; }
-                if v > dmax { dmax = v; }
+                if v < dmin {
+                    dmin = v;
+                }
+                if v > dmax {
+                    dmax = v;
+                }
             }
         }
         self.data_min = dmin;
@@ -351,7 +414,11 @@ impl FitsViewerApp {
         }
 
         // Update slider positions
-        let den = if (dmax - dmin).abs() > 1e-15 { dmax - dmin } else { 1.0 };
+        let den = if (dmax - dmin).abs() > 1e-15 {
+            dmax - dmin
+        } else {
+            1.0
+        };
         self.vmin_slider = ((self.vmin - dmin) / den) as f32;
         self.vmax_slider = ((self.vmax - dmin) / den) as f32;
 
@@ -366,11 +433,8 @@ impl FitsViewerApp {
             let cmap = COLORMAP_NAMES[self.cmap_index];
             let (w, h, pixels) = rendering::render_to_rgba(data, self.vmin, self.vmax, algo, cmap);
             let color_image = egui::ColorImage::from_rgba_unmultiplied([w, h], &pixels);
-            self.texture = Some(ctx.load_texture(
-                "fits_image",
-                color_image,
-                TextureOptions::NEAREST,
-            ));
+            self.texture =
+                Some(ctx.load_texture("fits_image", color_image, TextureOptions::NEAREST));
             self.needs_rerender = false;
         }
     }
@@ -392,17 +456,24 @@ impl FitsViewerApp {
 // ── eframe::App implementation ───────────────────────────────────────────
 impl eframe::App for FitsViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Apply dark theme
-        let mut visuals = egui::Visuals::dark();
-        visuals.panel_fill = BG_MAIN;
-        visuals.window_fill = BG_PANEL;
-        visuals.widgets.noninteractive.bg_fill = BG_PANEL;
-        visuals.widgets.inactive.bg_fill = Color32::from_rgb(13, 17, 23);
-        visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, TEXT_DIM);
-        visuals.widgets.hovered.bg_fill = Color32::from_rgb(30, 37, 48);
-        visuals.widgets.active.bg_fill = Color32::from_rgb(40, 50, 65);
-        visuals.selection.bg_fill = Color32::from_rgba_premultiplied(88, 166, 255, 40);
-        visuals.selection.stroke = Stroke::new(1.0, ACCENT);
+        let palette = self.ui_theme.palette();
+
+        // Apply selected theme
+        let mut visuals = if self.ui_theme == UiTheme::Dark {
+            egui::Visuals::dark()
+        } else {
+            egui::Visuals::light()
+        };
+        visuals.panel_fill = palette.bg_main;
+        visuals.window_fill = palette.bg_panel;
+        visuals.widgets.noninteractive.bg_fill = palette.bg_panel;
+        visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, palette.text_primary);
+        visuals.widgets.inactive.bg_fill = palette.widget_inactive_fill;
+        visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, palette.text_dim);
+        visuals.widgets.hovered.bg_fill = palette.widget_hovered_fill;
+        visuals.widgets.active.bg_fill = palette.widget_active_fill;
+        visuals.selection.bg_fill = palette.selection_fill;
+        visuals.selection.stroke = Stroke::new(1.0, palette.accent);
         ctx.set_visuals(visuals);
 
         // Handle Ctrl+O keyboard shortcut
@@ -432,25 +503,55 @@ impl eframe::App for FitsViewerApp {
         egui::SidePanel::left("left_panel")
             .exact_width(280.0)
             .frame(Frame {
-                fill: BG_PANEL,
-                stroke: Stroke::new(1.0, BORDER),
+                fill: palette.bg_panel,
+                stroke: Stroke::new(1.0, palette.border),
                 inner_margin: Margin::same(12),
                 corner_radius: CornerRadius::same(12),
                 ..Default::default()
             })
             .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Theme").color(palette.text_primary).strong());
+                    egui::ComboBox::from_id_salt("theme_combo")
+                        .selected_text(match self.ui_theme {
+                            UiTheme::Dark => "Dark",
+                            UiTheme::RomaLight => "Light (Roma)",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.ui_theme, UiTheme::Dark, "Dark");
+                            ui.selectable_value(
+                                &mut self.ui_theme,
+                                UiTheme::RomaLight,
+                                "Light (Roma)",
+                            );
+                        });
+                });
+                ui.add_space(8.0);
+
                 // Open File button
-                if ui.add(
-                    egui::Button::new(RichText::new("📂 Open File").color(ACCENT).size(13.0))
-                        .fill(Color32::from_rgb(30, 37, 48))
+                if ui
+                    .add(
+                        egui::Button::new(
+                            RichText::new("📂 Open File")
+                                .color(palette.accent)
+                                .size(13.0),
+                        )
+                        .fill(palette.button_fill)
                         .corner_radius(CornerRadius::same(8))
                         .min_size(Vec2::new(ui.available_width(), 32.0)),
-                ).clicked() {
+                    )
+                    .clicked()
+                {
                     self.show_open_dialog();
                 }
                 ui.add_space(8.0);
 
-                ui.label(RichText::new("FILE STRUCTURE").color(ACCENT).strong().size(14.0));
+                ui.label(
+                    RichText::new("FILE STRUCTURE")
+                        .color(palette.accent)
+                        .strong()
+                        .size(14.0),
+                );
                 ui.add_space(8.0);
 
                 if let Some(doc) = &self.fits_doc {
@@ -464,25 +565,45 @@ impl eframe::App for FitsViewerApp {
                             } else {
                                 format!("{:?}", hdu.shape)
                             };
-                            let label = format!("{} | {}\n{} {}", hdu.index, hdu.name, typ, shape_str);
+                            let label =
+                                format!("{} | {}\n{} {}", hdu.index, hdu.name, typ, shape_str);
 
                             let bg = if selected {
-                                Color32::from_rgba_premultiplied(88, 166, 255, 38)
+                                Color32::from_rgba_premultiplied(
+                                    palette.accent.r(),
+                                    palette.accent.g(),
+                                    palette.accent.b(),
+                                    38,
+                                )
                             } else {
                                 Color32::TRANSPARENT
                             };
-                            let text_color = if selected { ACCENT } else { TEXT_DIM };
+                            let text_color = if selected {
+                                palette.accent
+                            } else {
+                                palette.text_dim
+                            };
 
                             let resp = ui.add(
-                                egui::Button::new(RichText::new(label).color(text_color).size(11.0))
-                                    .fill(bg)
-                                    .corner_radius(CornerRadius::same(6))
-                                    .stroke(if selected {
-                                        Stroke::new(1.0, Color32::from_rgba_premultiplied(88, 166, 255, 77))
-                                    } else {
-                                        Stroke::NONE
-                                    })
-                                    .min_size(Vec2::new(ui.available_width(), 0.0)),
+                                egui::Button::new(
+                                    RichText::new(label).color(text_color).size(11.0),
+                                )
+                                .fill(bg)
+                                .corner_radius(CornerRadius::same(6))
+                                .stroke(if selected {
+                                    Stroke::new(
+                                        1.0,
+                                        Color32::from_rgba_premultiplied(
+                                            palette.accent.r(),
+                                            palette.accent.g(),
+                                            palette.accent.b(),
+                                            77,
+                                        ),
+                                    )
+                                } else {
+                                    Stroke::NONE
+                                })
+                                .min_size(Vec2::new(ui.available_width(), 0.0)),
                             );
                             if resp.clicked() && self.selected_hdu != hdu.index {
                                 self.select_hdu(hdu.index);
@@ -490,24 +611,37 @@ impl eframe::App for FitsViewerApp {
                         }
                     });
                 } else {
-                    ui.label(RichText::new("No file loaded").color(TEXT_DIM).italics());
+                    ui.label(
+                        RichText::new("No file loaded")
+                            .color(palette.text_dim)
+                            .italics(),
+                    );
                 }
 
                 ui.add_space(16.0);
-                ui.label(RichText::new("METADATA").color(ACCENT).strong().size(14.0));
+                ui.label(
+                    RichText::new("METADATA")
+                        .color(palette.accent)
+                        .strong()
+                        .size(14.0),
+                );
                 ui.add_space(4.0);
 
                 ScrollArea::vertical()
                     .id_salt("metadata_scroll")
+                    .max_height(ui.available_height())
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         if let Some(doc) = &self.fits_doc {
                             if let Some(hdu) = doc.hdus.get(self.selected_hdu) {
+                                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                                 ui.add(
-                                    egui::TextEdit::multiline(&mut hdu.header_text.as_str())
-                                        .font(FontId::monospace(9.0))
-                                        .text_color(ACCENT_BLUE)
-                                        .desired_width(f32::INFINITY),
+                                    egui::Label::new(
+                                        RichText::new(&hdu.header_text)
+                                            .font(FontId::monospace(9.0))
+                                            .color(palette.accent_secondary),
+                                    )
+                                    .selectable(true),
                                 );
                             }
                         }
@@ -518,8 +652,8 @@ impl eframe::App for FitsViewerApp {
         egui::SidePanel::right("right_panel")
             .exact_width(260.0)
             .frame(Frame {
-                fill: BG_PANEL,
-                stroke: Stroke::new(1.0, BORDER),
+                fill: palette.bg_panel,
+                stroke: Stroke::new(1.0, palette.border),
                 inner_margin: Margin::same(12),
                 corner_radius: CornerRadius::same(12),
                 ..Default::default()
@@ -527,10 +661,15 @@ impl eframe::App for FitsViewerApp {
             .show(ctx, |ui| {
                 if self.view_mode == ViewMode::Image {
                     // ── Visualization controls ───────────────────────
-                    ui.label(RichText::new("VISUALIZATION").color(ACCENT).strong().size(14.0));
+                    ui.label(
+                        RichText::new("VISUALIZATION")
+                            .color(palette.accent)
+                            .strong()
+                            .size(14.0),
+                    );
                     ui.add_space(8.0);
 
-                    ui.label(RichText::new("Algorithm:").color(TEXT_PRIMARY));
+                    ui.label(RichText::new("Algorithm:").color(palette.text_primary));
                     let prev_norm = self.norm_index;
                     egui::ComboBox::from_id_salt("norm_combo")
                         .selected_text(NORM_NAMES[self.norm_index])
@@ -544,7 +683,7 @@ impl eframe::App for FitsViewerApp {
                     }
 
                     ui.add_space(4.0);
-                    ui.label(RichText::new("Colormap:").color(TEXT_PRIMARY));
+                    ui.label(RichText::new("Colormap:").color(palette.text_primary));
                     let prev_cmap = self.cmap_index;
                     egui::ComboBox::from_id_salt("cmap_combo")
                         .selected_text(COLORMAP_NAMES[self.cmap_index])
@@ -560,11 +699,13 @@ impl eframe::App for FitsViewerApp {
                     ui.add_space(12.0);
 
                     // VMIN
-                    ui.label(RichText::new("VMIN").color(TEXT_PRIMARY));
+                    ui.label(RichText::new("VMIN").color(palette.text_primary));
                     let mut vmin_text = format!("{:.4}", self.vmin);
-                    ui.add(egui::TextEdit::singleline(&mut vmin_text)
-                        .desired_width(80.0)
-                        .text_color(ACCENT));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut vmin_text)
+                            .desired_width(80.0)
+                            .text_color(palette.accent),
+                    );
                     if let Ok(v) = vmin_text.parse::<f64>() {
                         if (v - self.vmin).abs() > 1e-8 {
                             self.vmin = v;
@@ -574,18 +715,21 @@ impl eframe::App for FitsViewerApp {
                     let prev_vmin_s = self.vmin_slider;
                     ui.add(egui::Slider::new(&mut self.vmin_slider, 0.0..=1.0).show_value(false));
                     if (self.vmin_slider - prev_vmin_s).abs() > 1e-5 {
-                        self.vmin = self.data_min + (self.vmin_slider as f64) * (self.data_max - self.data_min);
+                        self.vmin = self.data_min
+                            + (self.vmin_slider as f64) * (self.data_max - self.data_min);
                         self.needs_rerender = true;
                     }
 
                     ui.add_space(4.0);
 
                     // VMAX
-                    ui.label(RichText::new("VMAX").color(TEXT_PRIMARY));
+                    ui.label(RichText::new("VMAX").color(palette.text_primary));
                     let mut vmax_text = format!("{:.4}", self.vmax);
-                    ui.add(egui::TextEdit::singleline(&mut vmax_text)
-                        .desired_width(80.0)
-                        .text_color(ACCENT));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut vmax_text)
+                            .desired_width(80.0)
+                            .text_color(palette.accent),
+                    );
                     if let Ok(v) = vmax_text.parse::<f64>() {
                         if (v - self.vmax).abs() > 1e-8 {
                             self.vmax = v;
@@ -595,18 +739,27 @@ impl eframe::App for FitsViewerApp {
                     let prev_vmax_s = self.vmax_slider;
                     ui.add(egui::Slider::new(&mut self.vmax_slider, 0.0..=1.0).show_value(false));
                     if (self.vmax_slider - prev_vmax_s).abs() > 1e-5 {
-                        self.vmax = self.data_min + (self.vmax_slider as f64) * (self.data_max - self.data_min);
+                        self.vmax = self.data_min
+                            + (self.vmax_slider as f64) * (self.data_max - self.data_min);
                         self.needs_rerender = true;
                     }
 
                     // ── Cube controls ────────────────────────────────
                     if self.is_cube {
                         ui.add_space(20.0);
-                        ui.label(RichText::new("CUBE").color(ACCENT).strong().size(14.0));
+                        ui.label(
+                            RichText::new("CUBE")
+                                .color(palette.accent)
+                                .strong()
+                                .size(14.0),
+                        );
                         ui.add_space(4.0);
 
                         let prev_collapse = self.collapse_mode;
-                        ui.checkbox(&mut self.collapse_mode, RichText::new("Collapse (2D)").color(TEXT_PRIMARY));
+                        ui.checkbox(
+                            &mut self.collapse_mode,
+                            RichText::new("Collapse (2D)").color(palette.text_primary),
+                        );
 
                         if self.collapse_mode {
                             let prev_integ = self.integ_index;
@@ -623,7 +776,7 @@ impl eframe::App for FitsViewerApp {
                         }
 
                         if !self.collapse_mode {
-                            ui.label(RichText::new("Frame:").color(TEXT_PRIMARY));
+                            ui.label(RichText::new("Frame:").color(palette.text_primary));
                             let prev_frame = self.frame_index;
                             let max_frame = self.frame_count.saturating_sub(1);
                             let mut fi = self.frame_index as i32;
@@ -641,33 +794,55 @@ impl eframe::App for FitsViewerApp {
 
                     // ── View controls ────────────────────────────────
                     ui.add_space(20.0);
-                    ui.label(RichText::new("VIEW").color(ACCENT).strong().size(14.0));
+                    ui.label(
+                        RichText::new("VIEW")
+                            .color(palette.accent)
+                            .strong()
+                            .size(14.0),
+                    );
                     ui.add_space(4.0);
 
-                    ui.checkbox(&mut self.fit_to_view, RichText::new("Fit to View").color(TEXT_PRIMARY));
+                    ui.checkbox(
+                        &mut self.fit_to_view,
+                        RichText::new("Fit to View").color(palette.text_primary),
+                    );
 
                     ui.add_space(4.0);
-                    ui.label(RichText::new(format!("Zoom: {:.0}%", self.zoom_level * 100.0)).color(TEXT_DIM));
+                    ui.label(
+                        RichText::new(format!("Zoom: {:.0}%", self.zoom_level * 100.0))
+                            .color(palette.text_dim),
+                    );
                     ui.add_space(4.0);
 
-                    if ui.add(
-                        egui::Button::new(RichText::new("⟲ Reset Zoom").color(ACCENT).size(12.0))
-                            .fill(Color32::from_rgb(30, 37, 48))
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new("⟲ Reset Zoom")
+                                    .color(palette.accent)
+                                    .size(12.0),
+                            )
+                            .fill(palette.button_fill)
                             .corner_radius(CornerRadius::same(6))
                             .min_size(Vec2::new(ui.available_width(), 28.0)),
-                    ).clicked() {
+                        )
+                        .clicked()
+                    {
                         self.reset_zoom();
                     }
                 } else {
-                    ui.label(RichText::new("No image controls").color(TEXT_DIM).italics());
+                    ui.label(
+                        RichText::new("No image controls")
+                            .color(palette.text_dim)
+                            .italics(),
+                    );
                 }
             });
 
         // ── CENTER PANEL ─────────────────────────────────────────────
         egui::CentralPanel::default()
             .frame(Frame {
-                fill: BG_PANEL,
-                stroke: Stroke::new(1.0, BORDER),
+                fill: palette.bg_panel,
+                stroke: Stroke::new(1.0, palette.border),
                 inner_margin: Margin::same(0),
                 corner_radius: CornerRadius::same(12),
                 ..Default::default()
@@ -678,13 +853,13 @@ impl eframe::App for FitsViewerApp {
                     ui.add_space(15.0);
                     ui.label(
                         RichText::new(format!("OBJECT: {}", self.object_name))
-                            .color(ACCENT_BLUE)
+                            .color(palette.accent_secondary)
                             .strong()
                             .size(14.0),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(15.0);
-                        ui.label(RichText::new(&self.mouse_info).color(TEXT_DIM));
+                        ui.label(RichText::new(&self.mouse_info).color(palette.text_dim));
                     });
                 });
                 ui.add_space(4.0);
@@ -699,16 +874,16 @@ impl eframe::App for FitsViewerApp {
                             let base_scale = if self.fit_to_view {
                                 (available.x / tex_size.x).min(available.y / tex_size.y)
                             } else {
-                                (available.x / tex_size.x).min(available.y / tex_size.y).min(1.0)
+                                (available.x / tex_size.x)
+                                    .min(available.y / tex_size.y)
+                                    .min(1.0)
                             };
                             let effective_scale = base_scale * self.zoom_level;
                             let display_size = tex_size * effective_scale;
 
                             // Allocate the full available area for interaction
-                            let (resp, mut painter) = ui.allocate_painter(
-                                available,
-                                egui::Sense::click_and_drag(),
-                            );
+                            let (resp, mut painter) =
+                                ui.allocate_painter(available, egui::Sense::click_and_drag());
                             let canvas_rect = resp.rect;
 
                             // Image rect centered in canvas, offset by pan
@@ -732,7 +907,8 @@ impl eframe::App for FitsViewerApp {
                                 self.zoom_level = (self.zoom_level * zoom_factor).clamp(0.1, 50.0);
                                 // Zoom toward the cursor position
                                 if let Some(cursor) = resp.hover_pos() {
-                                    let cursor_vec = Vec2::new(cursor.x, cursor.y) - Vec2::new(center.x, center.y);
+                                    let cursor_vec = Vec2::new(cursor.x, cursor.y)
+                                        - Vec2::new(center.x, center.y);
                                     let ratio = 1.0 - self.zoom_level / old_zoom;
                                     self.pan_offset += cursor_vec * ratio;
                                 }
@@ -772,19 +948,26 @@ impl eframe::App for FitsViewerApp {
                                     painter.rect_filled(
                                         sel_rect,
                                         0.0,
-                                        Color32::from_rgba_premultiplied(88, 166, 255, 30),
+                                        Color32::from_rgba_premultiplied(
+                                            palette.accent.r(),
+                                            palette.accent.g(),
+                                            palette.accent.b(),
+                                            30,
+                                        ),
                                     );
                                     painter.rect_stroke(
                                         sel_rect,
                                         0.0,
-                                        Stroke::new(1.5, ACCENT),
+                                        Stroke::new(1.5, palette.accent),
                                         egui::StrokeKind::Outside,
                                     );
                                 }
                             }
 
                             // Commit drag-to-zoom on release
-                            if resp.drag_stopped_by(egui::PointerButton::Primary) && !self.is_panning {
+                            if resp.drag_stopped_by(egui::PointerButton::Primary)
+                                && !self.is_panning
+                            {
                                 if let (Some(start), Some(end)) = (self.drag_start, self.drag_end) {
                                     let sel = Rect::from_two_pos(start, end);
                                     if sel.width() > 8.0 && sel.height() > 8.0 {
@@ -801,8 +984,10 @@ impl eframe::App for FitsViewerApp {
                                             sel_center.y - canvas_center.y,
                                         );
 
-                                        self.pan_offset = (self.pan_offset - offset_before) * extra_zoom;
-                                        self.zoom_level = (self.zoom_level * extra_zoom).clamp(0.1, 50.0);
+                                        self.pan_offset =
+                                            (self.pan_offset - offset_before) * extra_zoom;
+                                        self.zoom_level =
+                                            (self.zoom_level * extra_zoom).clamp(0.1, 50.0);
                                         self.fit_to_view = false;
                                     }
                                 }
@@ -815,12 +1000,19 @@ impl eframe::App for FitsViewerApp {
                                 // Convert screen pos → image pixel
                                 let frac_x = (pos.x - img_rect.left()) / img_rect.width();
                                 let frac_y = (pos.y - img_rect.top()) / img_rect.height();
-                                if frac_x >= 0.0 && frac_x <= 1.0 && frac_y >= 0.0 && frac_y <= 1.0 {
+                                if frac_x >= 0.0 && frac_x <= 1.0 && frac_y >= 0.0 && frac_y <= 1.0
+                                {
                                     let px = (frac_x * tex_size.x) as i32;
                                     let py = ((1.0 - frac_y) * tex_size.y) as i32;
-                                    self.mouse_info = format!("X: {}  Y: {}  | Zoom: {:.0}%", px, py, self.zoom_level * 100.0);
+                                    self.mouse_info = format!(
+                                        "X: {}  Y: {}  | Zoom: {:.0}%",
+                                        px,
+                                        py,
+                                        self.zoom_level * 100.0
+                                    );
                                 } else {
-                                    self.mouse_info = format!("Zoom: {:.0}%", self.zoom_level * 100.0);
+                                    self.mouse_info =
+                                        format!("Zoom: {:.0}%", self.zoom_level * 100.0);
                                 }
                             }
                         } else {
@@ -832,12 +1024,12 @@ impl eframe::App for FitsViewerApp {
                                     ui.add_space(12.0);
                                     ui.label(
                                         RichText::new("Compressed image — not yet supported")
-                                            .color(TEXT_DIM)
+                                            .color(palette.text_dim)
                                             .size(18.0),
                                     );
                                     ui.label(
                                         RichText::new("Header data is available in the left panel")
-                                            .color(TEXT_DIM)
+                                            .color(palette.text_dim)
                                             .size(13.0),
                                     );
                                 } else {
@@ -845,21 +1037,28 @@ impl eframe::App for FitsViewerApp {
                                     ui.add_space(12.0);
                                     ui.label(
                                         RichText::new("Drop a FITS file here")
-                                            .color(TEXT_DIM)
+                                            .color(palette.text_dim)
                                             .size(18.0),
                                     );
                                     ui.label(
                                         RichText::new("or press Ctrl+O / click Open File")
-                                            .color(TEXT_DIM)
+                                            .color(palette.text_dim)
                                             .size(13.0),
                                     );
                                     ui.add_space(16.0);
-                                    if ui.add(
-                                        egui::Button::new(RichText::new("📂 Open File").color(ACCENT).size(15.0))
-                                            .fill(Color32::from_rgb(30, 37, 48))
+                                    if ui
+                                        .add(
+                                            egui::Button::new(
+                                                RichText::new("📂 Open File")
+                                                    .color(palette.accent)
+                                                    .size(15.0),
+                                            )
+                                            .fill(palette.button_fill)
                                             .corner_radius(CornerRadius::same(8))
                                             .min_size(Vec2::new(200.0, 40.0)),
-                                    ).clicked() {
+                                        )
+                                        .clicked()
+                                    {
                                         self.show_open_dialog();
                                     }
                                 }
@@ -880,8 +1079,9 @@ impl eframe::App for FitsViewerApp {
 impl FitsViewerApp {
     /// Render spectrum plot using egui_plot.
     fn draw_spectrum(&self, ui: &mut egui::Ui) {
+        let palette = self.ui_theme.palette();
         if self.wavelengths.is_empty() || self.flux.is_empty() {
-            ui.label(RichText::new("No spectrum data").color(TEXT_DIM));
+            ui.label(RichText::new("No spectrum data").color(palette.text_dim));
             return;
         }
 
@@ -893,7 +1093,7 @@ impl FitsViewerApp {
             .collect();
 
         let flux_line = Line::new(flux_points)
-            .color(SPECTRUM_CYAN)
+            .color(palette.spectrum_line)
             .width(1.2)
             .name("Flux");
 
@@ -913,12 +1113,23 @@ impl FitsViewerApp {
                         poly_points.push([w, f + err]);
                     }
                     // Lower bound (reverse)
-                    for (i, (&w, &f)) in self.wavelengths.iter().zip(self.flux.iter()).enumerate().rev() {
+                    for (i, (&w, &f)) in self
+                        .wavelengths
+                        .iter()
+                        .zip(self.flux.iter())
+                        .enumerate()
+                        .rev()
+                    {
                         let err = self.errors[i];
                         poly_points.push([w, f - err]);
                     }
                     let error_band = Polygon::new(PlotPoints::from(poly_points))
-                        .fill_color(Color32::from_rgba_premultiplied(0, 240, 255, 20))
+                        .fill_color(Color32::from_rgba_premultiplied(
+                            palette.spectrum_line.r(),
+                            palette.spectrum_line.g(),
+                            palette.spectrum_line.b(),
+                            20,
+                        ))
                         .stroke(Stroke::new(0.0, Color32::TRANSPARENT))
                         .name("Error");
                     plot_ui.polygon(error_band);
@@ -928,17 +1139,18 @@ impl FitsViewerApp {
 
     /// Render table data.
     fn draw_table(&self, ui: &mut egui::Ui) {
+        let palette = self.ui_theme.palette();
         let doc = match &self.fits_doc {
             Some(d) => d,
             None => {
-                ui.label(RichText::new("No data").color(TEXT_DIM));
+                ui.label(RichText::new("No data").color(palette.text_dim));
                 return;
             }
         };
         let table = match doc.tables.get(&self.selected_hdu) {
             Some(t) => t,
             None => {
-                ui.label(RichText::new("No table data for this HDU").color(TEXT_DIM));
+                ui.label(RichText::new("No table data for this HDU").color(palette.text_dim));
                 return;
             }
         };
@@ -950,14 +1162,14 @@ impl FitsViewerApp {
                 .show(ui, |ui| {
                     // Header
                     for col in &table.columns {
-                        ui.label(RichText::new(col).color(TEXT_DIM).strong());
+                        ui.label(RichText::new(col).color(palette.text_dim).strong());
                     }
                     ui.end_row();
 
                     // Rows
                     for row in &table.rows {
                         for val in row {
-                            ui.label(RichText::new(val).color(ACCENT_BLUE));
+                            ui.label(RichText::new(val).color(palette.accent_secondary));
                         }
                         ui.end_row();
                     }
