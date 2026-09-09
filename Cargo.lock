@@ -1501,6 +1501,7 @@ dependencies = [
  "egui_extras",
  "egui_plot",
  "env_logger",
+ "flate2",
  "image",
  "log",
  "ndarray",

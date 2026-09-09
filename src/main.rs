@@ -36,7 +36,7 @@ fn main() -> eframe::Result<()> {
                     .unwrap_or_else(|| "AstroFITS Explorer".to_string()),
             )
             .with_inner_size([1400.0, 950.0]),
-        hardware_acceleration: eframe::HardwareAcceleration::Off,
+        hardware_acceleration: eframe::HardwareAcceleration::Preferred,
         ..Default::default()
     };
 
@@ -54,6 +54,8 @@ fn configure_linux_software_rendering_defaults() {
             ("LIBGL_ALWAYS_SOFTWARE", "1"),
             ("MESA_LOADER_DRIVER_OVERRIDE", "llvmpipe"),
             ("GALLIUM_DRIVER", "llvmpipe"),
+            // EGL_ALWAYS_SOFTWARE covers Wayland/EGL (different stack from GLX)
+            ("EGL_ALWAYS_SOFTWARE", "true"),
         ] {
             if std::env::var_os(key).is_none() {
                 // Set safe defaults for systems without a working GPU/EGL stack.

@@ -135,8 +135,12 @@ pub fn render_to_rgba(
         let src_row = ny - 1 - row;
         for col in 0..nx {
             let val = data[[src_row, col]];
-            let norm = normalize(val, vmin, vmax, algo);
-            let color = apply_colormap(norm, cmap_name);
+            let color = if val.is_nan() {
+                [0, 0, 0, 255]
+            } else {
+                let norm = normalize(val, vmin, vmax, algo);
+                apply_colormap(norm, cmap_name)
+            };
             let idx = (row * nx + col) * 4;
             pixels[idx] = color[0];
             pixels[idx + 1] = color[1];
